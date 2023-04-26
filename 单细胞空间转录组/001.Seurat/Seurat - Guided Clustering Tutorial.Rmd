@@ -1,0 +1,354 @@
+---
+title: "Seurat - Guided Clustering Tutorial"
+author: TigerZ
+date: 2023-1-31
+output: 
+  html_notebook: 
+    toc: yes
+    number_sections: yes
+    css: F:/Github/learn/R/notebook.css
+---
+
+# Setup the Seurat Object
+
+在本教程中，我们将分析 10X Genomics 免费提供的外周血单核细胞 (PBMC) 数据集。在 Illumina NextSeq 500 上对 2,700 个单细胞进行了测序。原始数据可以在[这里](https://cf.10xgenomics.com/samples/cell/pbmc3k/pbmc3k_filtered_gene_bc_matrices.tar.gz)找到。
+
+我们从读取数据开始。`Read10X()` 函数从 10X cellranger pipeline 的输出中读取数据，返回一个唯一的分子识别 (UMI) 计数矩阵。此矩阵中的值表示在每个 cell(column) 中检测到的每个 feature(i.e. gene; row) 的分子数。
+
+接下来我们使用 count matrix 创建一个 `Seurat` 对象。该对象作为一个容器，包含了单细胞数据集的 data(like the count matrix) 和 analysis (like PCA, or clustering results)。有关 `Seurat` 对象结构的技术讨论，请查看我们的 [GitHub Wiki](https://github.com/satijalab/seurat/wiki)。例如，count matrix 存储在 `pbmc[["RNA"]]@counts` 中。
+
+```{r}
+library(dplyr)
+library(Seurat)
+library(patchwork)
+
+# Load the PBMC dataset
+pbmc.data <- Read10X(data.dir = "hg19/")
+# Initialize the Seurat object with the raw (non-normalized data).
+pbmc <- CreateSeuratObject(counts = pbmc.data, project = "pbmc3k", min.cells = 3, min.features = 200)
+```
+
+```{r}
+pbmc
+```
+
+
+
+
+
+# Standard pre-processing workflow
+
+以下步骤包含 Seurat 中 scRNA-seq 数据的标准预处理工作流程。这些代表了基于 QC 指标的细胞选择和过滤、数据归一化和标准化，以及高变特征的检测。
+
+## QC and selecting cells for further analysis
+
+Seurat 允许您根据任何用户定义的标准轻松探索 QC 指标和过滤细胞。社区常用的一些质量控制指标包括：
+
+- 在每个细胞中检测到的独特基因的数量。
+  - 低质量细胞或空液滴通常含有很少的基因
+  - Cell doublets 或 multiplets 可能表现出异常高的基因计数
+- 同样，细胞内检测到的分子总数（与独特基因密切相关）
+- 映射到线粒体基因组的reads百分比
+  - 低质量/垂死的细胞通常表现出广泛的线粒体污染
+  - 我们使用 `PercentageFeatureSet()` 函数计算线粒体 QC 指标，该函数计算源自一组特征的计数百分比
+  - 我们使用以 `MT-` 开头的所有基因的集合作为一组线粒体基因
+
+```{r}
+# The [[ operator can add columns to object metadata. This is a great place to stash QC stats
+pbmc[["percent.mt"]] <- PercentageFeatureSet(pbmc, pattern = "^MT-")
+```
+
+在下面的示例中，我们可视化 QC 指标，并使用它们来过滤细胞。
+
+- 我们过滤具有超过 2,500 或少于 200 的唯一特征计数的细胞
+- 我们过滤线粒体计数 >5% 的细胞
+
+```{r}
+# Visualize QC metrics as a violin plot
+VlnPlot(pbmc, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+```
+
+```{r fig.height=1.5, fig.width=3.5}
+# FeatureScatter 通常用于可视化特征-特征关系，但也可用于对于对象计算的任何内容，即对象metadata中的列、PC 分数等。
+plot1 <- FeatureScatter(pbmc, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(pbmc, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1 + plot2
+```
+
+```{r}
+pbmc <- subset(pbmc, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 5)
+```
+
+
+
+
+
+# Normalizing the data
+
+从数据集中删除不需要的细胞后，下一步是规范化数据。默认情况下，我们采用全局尺度归一化方法“LogNormalize”，通过总表达量对每个细胞的特征表达测量值进行规范化，将其乘以 scale factor (10,000 by default)，并对结果进行对数转换。规范化值存储在 `pbmc[["RNA"]]@data` 中。
+
+```{r}
+pbmc <- NormalizeData(pbmc, normalization.method = "LogNormalize", scale.factor = 10000)
+```
+
+为清楚起见，在前面的代码行（以及未来的命令中），我们为函数调用中的某些参数提供了默认值。但是，这不是必需的，可以通过以下方式实现相同的行为：
+
+```{r}
+pbmc <- NormalizeData(pbmc)
+```
+
+
+
+
+
+# Identification of highly variable features (feature selection)
+
+接下来，我们计算在数据集中表现出高细胞间变异的特征子集（即，它们在某些细胞中高表达，而在其他细胞中低表达）。我们和其他人发现，在下游分析中关注这些基因有助于突出单细胞数据集中的生物信号。
+
+[文章](https://doi.org/10.1016/j.cell.2019.05.031)中详细描述了 Seurat 的过程，并通过直接对单细胞数据中固有的均值-方差关系进行建模来改进以前的版本，并在 `FindVariableFeatures()` 函数中实现。默认情况下，我们为每个数据集返回 2,000 个特征。这些将用于下游分析，如 PCA。
+
+```{r fig.height=1.5, fig.width=3.5, message=FALSE, warning=FALSE, paged.print=FALSE}
+pbmc <- FindVariableFeatures(pbmc, selection.method = "vst", nfeatures = 2000)
+
+# Identify the 10 most highly variable genes
+top10 <- head(VariableFeatures(pbmc), 10)
+```
+
+```{r fig.height=1.5, fig.width=3.5, message=FALSE, warning=FALSE}
+# plot variable features with and without labels
+plot1 <- VariableFeaturePlot(pbmc)
+plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
+plot1 + plot2
+```
+
+
+
+
+
+# Scaling the data
+
+接下来，我们应用线性变换（“scaling”），这是在 PCA 等降维技术之前的标准预处理步骤。 `ScaleData()` 函数：
+
+- 移动每个基因的表达，使跨细胞的平均表达为 0
+- 缩放每个基因的表达，使得跨细胞的方差为 1
+  - 此步骤在下游分析中给予同等权重，因此高表达基因不会占主导地位
+- 结果存储在 `pbmc[["RNA"]]@scale.data` 中
+
+```{r}
+all.genes <- rownames(pbmc)
+pbmc <- ScaleData(pbmc, features = all.genes)
+```
+
+
+
+
+
+# Perform linear dimensional reduction
+
+接下来我们对缩放后的数据执行PCA。默认情况下，只有先前确定的变量特征用作输入，但如果您希望选择不同的子集，可以使用 `features` 参数定义。
+
+```{r}
+pbmc <- RunPCA(pbmc, features = VariableFeatures(object = pbmc))
+```
+
+Seurat 提供了几种有用的方法来可视化定义 PCA 的细胞和特征，包括 `VizDimReduction()`、`DimPlot()` 和 `DimHeatmap()`
+
+```{r}
+# Examine and visualize PCA results a few different ways
+print(pbmc[["pca"]], dims = 1:5, nfeatures = 5)
+```
+
+```{r fig.height=2, fig.width=3.5}
+VizDimLoadings(pbmc, dims = 1:2, reduction = "pca")
+```
+
+```{r}
+DimPlot(pbmc, reduction = "pca")
+```
+
+特别是 `DimHeatmap()` 允许轻松探索数据集中异质性的主要来源，并且在尝试决定要包括哪些 PC 以进行进一步的下游分析时非常有用。细胞和特征都根据其 PCA 分数排序。将 `cells` 设置为一个数字会绘制光谱两端的“极端”细胞，这会显着加快大型数据集的绘制速度。虽然显然是监督分析，但我们发现这是探索相关特征集的宝贵工具。
+
+```{r}
+DimHeatmap(pbmc, dims = 1, cells = 500, balanced = TRUE)
+```
+
+```{r fig.height=5, fig.width=3}
+DimHeatmap(pbmc, dims = 1:15, cells = 500, balanced = TRUE)
+```
+
+
+
+
+
+# Determine the ‘dimensionality’ of the dataset
+
+为了克服 scRNA-seq 数据的任何单一特征中广泛的技术噪音，Seurat 根据其 PCA 分数对细胞进行聚类，每个 PC 本质上代表一个“metafeature”，它结合了相关特征集的信息。因此，顶级主成分代表了数据集的强大压缩。但是，我们应该选择包含多少个组件？ 10？ 20？ 100？
+
+In [Macosko et al](http://www.cell.com/abstract/S0092-8674(15)00549-8)，我们实施了受 JackStraw 程序启发的重采样测试。我们随机排列数据的一个子集（默认为 1%）并重新运行 PCA，构建特征分数的“零分布”，然后重复此过程。我们将“重要”PC 识别为具有低 p-value 特征的大量丰富的 PC。
+
+```{r}
+# 注意：对于大数据集，此过程可能需要很长时间，为了方便起见，请注释掉。更多的近似技术，例如在 ElbowPlot() 中实现的技术，可用于减少计算时间
+pbmc <- JackStraw(pbmc, num.replicate = 100)
+pbmc <- ScoreJackStraw(pbmc, dims = 1:20)
+```
+
+`JackStrawPlot()` 函数提供了一个可视化工具，用于将每个 PC 的 p-value 分布与均匀分布（虚线）进行比较。“显着”PC 将显示具有低 p-value （虚线上方的实线）的特征的强烈富集。在这种情况下，似乎在前 10-12 个 PC 之后显着性急剧下降。
+
+```{r message=FALSE, warning=FALSE}
+JackStrawPlot(pbmc, dims = 1:15)
+```
+
+另一种启发式方法生成“Elbow plot”：根据每个主成分解释的方差百分比（`ElbowPlot()` 函数）对主成分进行排名。在此示例中，我们可以在 PC9-10 周围观察到一个“elbow”，这表明大部分真实信号是在前 10 个 PC 中捕获的。
+
+```{r}
+ElbowPlot(pbmc)
+```
+
+识别数据集的真实维度——对用户来说可能具有挑战性/不确定性。因此，我们建议考虑这三种方法。第一个是更有监督的，探索 PC 以确定相关的异质性来源，并且可以与 GSEA 结合使用。第二种实现基于随机空模型的统计检验，但对于大型数据集来说很耗时，并且可能无法返回明确的 PC 截止值。第三种是常用的启发式算法，可以立即计算。在此示例中，所有三种方法都产生了相似的结果，但我们可能有理由选择 PC 7-12 之间的任何值作为 cutoff。
+
+我们在这里选择了 10 个，但鼓励用户考虑以下几点：
+
+- Dendritic cell 和 NK aficionados 可能认识到与 PC 12 和 13 密切相关的基因定义了罕见的免疫亚群 (i.e. MZB1 is a marker for plasmacytoid DCs)。然而，这些群体非常罕见，在没有先验知识的情况下，很难将它们与这种规模的数据集的背景噪声区分开来。
+- 我们鼓励用户使用不同数量的 PC（10、15 甚至 50！）重复下游分析。正如您将观察到的，结果通常不会有显着差异。
+- 我们建议用户在选择此参数时犯错误。例如，仅使用 5 个 PC 执行下游分析会对结果产生重大不利影响。
+
+
+
+
+
+# Cluster the cells
+
+Seurat v3 应用基于图的聚类方法，建立在 ([Macosko et al](http://www.cell.com/abstract/S0092-8674(15)00549-8)) 的初始策略之上。重要的是，驱动聚类分析的距离度量（基于先前识别的 PC）保持不变。然而，我们将细胞距离矩阵划分为 clusters 的方法有了显着改进。我们的方法深受近期手稿的启发，这些手稿将基于图的聚类方法应用于 scRNA-seq 数据 [[SNN-Cliq, Xu and Su, Bioinformatics, 2015]](http://bioinformatics.oxfordjournals.org/content/early/2015/02/10/bioinformatics.btv088.abstract) 和 CyTOF 数据 [[PhenoGraph, Levine et al., Cell, 2015]](http://www.ncbi.nlm.nih.gov/pubmed/26095251)。简而言之，这些方法将细胞嵌入到图结构中——例如 K-nearest neighbor(KNN) graph，在具有相似特征表达模式的细胞之间绘制边，然后尝试将该图划分为高度互连的“准集团”或“社区”。
+
+与 PhenoGraph 一样，我们首先基于 PCA 空间中的欧几里得距离构建 KNN 图，并根据其局部邻域中的共享重叠（Jaccard 相似性）细化任意两个单元之间的边权重。此步骤使用 `FindNeighbors()` 函数执行，并将先前定义的数据集维度（前 10 个 PC）作为输入。
+
+为了对细胞进行聚类，我们接下来应用模块化优化技术，例如 Louvain 算法（默认）或 SLM [ [SLM, Blondel et al., Journal of Statistical Mechanics]](http://dx.doi.org/10.1088/1742-5468/2008/10/P10008)，以迭代方式将细胞组合在一起，以优化标准模块化函数。`FindClusters()` 函数实现了这个过程，并包含一个分辨率参数，该参数设置下游聚类的“粒度”，增加的值会导致更多的聚类。我们发现将此参数设置在 0.4-1.2 之间通常会为大约 3K 细胞的单细胞数据集返回良好的结果。对于较大的数据集，最佳分辨率通常会增加。可以使用 `Idents()` 函数找到 clusters。
+
+```{r}
+pbmc <- FindNeighbors(pbmc, dims = 1:10)
+pbmc <- FindClusters(pbmc, resolution = 0.5)
+```
+
+```{r}
+# Look at cluster IDs of the first 5 cells
+head(Idents(pbmc), 5)
+```
+
+
+
+
+
+# Run non-linear dimensional reduction (UMAP/tSNE)
+
+Seurat 提供了多种非线性降维技术，例如 tSNE 和 UMAP，以可视化和探索这些数据集。这些算法的目标是学习数据的底层流形，以便将相似的细胞放在低维空间中。上面确定的基于图的cluster中的细胞应该在这些降维图上共同定位。作为 UMAP 和 tSNE 的输入，我们建议使用相同的 PC 作为聚类分析的输入。
+
+```{r}
+# 如果你还没有安装 UMAP，你可以通过 reticulate::py_install(packages = 'umap-learn')
+pbmc <- RunUMAP(pbmc, dims = 1:10)
+```
+
+```{r}
+# 请注意，您可以设置 `label = TRUE` 或使用 LabelClusters 函数来帮助标记单个集群
+DimPlot(pbmc, reduction = "umap")
+```
+
+您可以在此时保存该对象，以便可以轻松地将其加载回去，而无需重新运行上面执行的计算密集型步骤，或者可以轻松地与协作者共享。
+
+```{r}
+saveRDS(pbmc, file = "pbmc_tutorial.rds")
+```
+
+
+
+
+
+# Finding differentially expressed features (cluster biomarkers)
+
+Seurat 可以帮助您找到通过差异表达定义 clusters 的 markers。默认情况下，与所有其他细胞相比，它识别单个 cluster（specified in `ident.1`）的阳性和阴性标记。`FindAllMarkers()` 会针对所有 clusters 自动执行此过程，但您也可以测试 clusters 组之间的对比，或针对所有细胞进行测试。
+
+`min.pct` 参数要求在两组细胞中以最小百分比检测到一个特征，而 `thresh.test` 参数要求一个特征在两组之间以一定数量差异表达（平均）。您可以将这两个设置为 0，但时间会急剧增加 - 因为这将测试大量不太可能具有高度差异性的功能。作为加速这些计算的另一种选择，可以设置 `max.cells.per.ident`。这将对每个身份类别进行下采样，使其中的细胞数量不超过设置的数量。虽然通常会出现功率损失，但速度可能会显着提高，并且差异表达最高的特征可能仍会上升到顶部。
+
+```{r message=FALSE, warning=FALSE}
+# find all markers of cluster 2
+cluster2.markers <- FindMarkers(pbmc, ident.1 = 2, min.pct = 0.25)
+```
+
+```{r}
+head(cluster2.markers, n = 5)
+```
+
+```{r}
+# find all markers distinguishing cluster 5 from clusters 0 and 3
+cluster5.markers <- FindMarkers(pbmc, ident.1 = 5, ident.2 = c(0, 3), min.pct = 0.25)
+```
+
+```{r}
+# find markers for every cluster compared to all remaining cells, report only the positive
+# ones
+pbmc.markers <- FindAllMarkers(pbmc, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+```
+
+Seurat 有几个差异表达测试，可以使用 `test.use` 参数设置（有关详细信息，请参阅我们的 [DE vignette](https://satijalab.org/seurat/articles/de_vignette.html)）。例如，ROC 测试返回任何单个标记的“分类能力”（范围从 0-random 到 1-perfect）。
+
+```{r}
+cluster0.markers <- FindMarkers(pbmc, ident.1 = 0, logfc.threshold = 0.25, test.use = "roc", only.pos = TRUE)
+```
+
+我们包括几个用于可视化标记表达的工具。`VlnPlot()`（显示跨clusters的表达概率分布）和 `FeaturePlot()`（在 tSNE 或 PCA 图上可视化特征表达）是我们最常用的可视化。我们还建议探索 `RidgePlot()`、`CellScatter()` 和 `DotPlot()` 作为查看数据集的其他方法。
+
+```{r fig.height=1.5, fig.width=3.5}
+VlnPlot(pbmc, features = c("MS4A1", "CD79A"))
+```
+
+```{r fig.height=1.5, fig.width=3.5}
+# you can plot raw counts as well
+VlnPlot(pbmc, features = c("NKG7", "PF4"), slot = "counts", log = TRUE)
+```
+
+```{r fig.height=3, fig.width=4}
+FeaturePlot(pbmc, features = c("MS4A1", "GNLY", "CD3E", "CD14", "FCER1A", "FCGR3A", "LYZ", "PPBP", "CD8A"))
+```
+
+`DoHeatmap()` 为给定的细胞和特征生成一个表达式热图。在这种情况下，我们为每个cluster绘制前 20个标记（或所有标记，如果少于 20 个）。
+
+```{r fig.height=4, fig.width=5}
+pbmc.markers %>%
+    group_by(cluster) %>%
+    top_n(n = 10, wt = avg_log2FC) -> top10
+DoHeatmap(pbmc, features = top10$gene) + NoLegend()
+```
+
+
+
+
+
+# Assigning cell type identity to clusters
+
+幸运的是，对于这个数据集，我们可以使用规范标记轻松地将无偏聚类与已知细胞类型相匹配：
+
+```{r}
+new.cluster.ids <- c("Naive CD4 T", "CD14+ Mono", "Memory CD4 T", "B", "CD8 T", "FCGR3A+ Mono", "NK", "DC", "Platelet")
+names(new.cluster.ids) <- levels(pbmc)
+pbmc <- RenameIdents(pbmc, new.cluster.ids)
+DimPlot(pbmc, reduction = "umap", label = TRUE, pt.size = 0.5) + NoLegend()
+```
+
+```{r}
+saveRDS(pbmc, file = "pbmc3k_final.rds")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

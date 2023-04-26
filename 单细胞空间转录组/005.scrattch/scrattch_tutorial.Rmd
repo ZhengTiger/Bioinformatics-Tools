@@ -1,0 +1,570 @@
+---
+title: "scrattch.hicat tutorial"
+date: '2022-07-09'
+author: ZhengHu
+output: 
+  html_notebook: 
+    toc: yes
+    css: scrattch.css
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T, warning = FALSE)
+```
+
+# 1 Data Selection
+## 1.1 Loading libraries
+首先，我们需要加载 `scattch.hicat` 和 `tasic2016data` 包，以及 `Matrix` 和 `matrixStats`，我们将使用它们进行一些计算：
+
+```{r}
+suppressMessages(library(tasic2016data))
+suppressMessages(library(scrattch.hicat))
+suppressMessages(library(dendextend))
+suppressMessages(library(dplyr))
+suppressMessages(library(matrixStats))
+suppressMessages(library(Matrix))
+```
+
+## 1.2 tasic2016data overview
+`tasic2016data` 包以 `tasic_2016_anno` 对象的形式提供样本注释，并以 `tasic_2016_counts` 形式提供每个基因 count 数据的矩阵。
+
+```{r}
+dim(tasic_2016_anno)
+head(tasic_2016_anno)
+dim(tasic_2016_counts)
+tasic_2016_counts[1:5,1:5]
+```
+
+## 1.3 Sample selection
+对于这个演示，我们将选择 CGE-derived interneurons 的一小部分进行聚类。 这为我们提供了一组 284 single-cell transcriptomic profiles， 以便后续分析步骤快速运行。
+
+```{r}
+select.cells <- tasic_2016_anno %>%
+  filter(primary_type_label != "unclassified") %>%
+  filter(grepl("Igtp|Ndnf|Vip|Sncg|Smad3", primary_type_label)) %>%
+  select(sample_name) %>%
+  unlist()
+
+length(select.cells)
+```
+
+## 1.4 Reference setup
+接下来，我们将设置 cluster annotations 以用作参考 (**ref.cl.df**)。
+这些注释来自 Tasic, et al., (2016) 中的分析。
+
+```{r}
+ref_anno <- tasic_2016_anno %>%
+  filter(sample_name %in% select.cells)
+
+# Make a data.frame of unique cluster id, type, color, and broad type
+ref.cl.df <- ref_anno %>%
+  select(primary_type_id, 
+         primary_type_label, 
+         primary_type_color, 
+         broad_type) %>%
+  unique()
+
+#standardize cluster annoation with cluster_id, cluster_label and cluster_color. These are the required fields to visualize clusters properly.
+colnames(ref.cl.df)[1:3] <- c("cluster_id", "cluster_label", "cluster_color")
+
+# Sort by cluster_id
+ref.cl.df <- arrange(ref.cl.df, cluster_id)
+row.names(ref.cl.df) <- ref.cl.df$cluster_id
+
+# Set up the ref.cl factor object
+ref.cl <- setNames(factor(ref_anno$primary_type_id), ref_anno$sample_name)
+```
+
+```{r}
+head(ref.cl.df)
+head(ref.cl)
+```
+
+## 1.5 Data normalization
+为了归一化数据，我们将执行两个步骤：
+首先，使用 `cpm()` 函数将 counts 转换为 counts per million reads (CPM)。
+然后，使用 `log2()` 函数对结果进行对数转换。
+
+```{r}
+tasic_2016_cpm <- cpm(tasic_2016_counts[,select.cells])
+norm.dat <- log2(tasic_2016_cpm + 1)
+```
+
+如果您有一个非常大的矩阵，我们建议您使用 `Matrix` 包将其转换为稀疏矩阵以节省内存。
+虽然这里没有必要，但我们将这样做来演示这些矩阵的使用。
+
+```{r}
+norm.dat <- Matrix(norm.dat, sparse = TRUE)
+```
+
+
+--------------------------------------------------------------------------------
+
+
+# 2 Setting Parameters
+## 2.1 Parameter Descriptions
+这种迭代聚类算法产生的最终聚类数量很大程度上取决于用户指定的所需细胞类型分辨率。
+细胞类型分辨率由 pair of clusters 之间的差异表达 (DE) 标准定义。
+用户可以提前指定这些标准，以便通过使用 `de_param()` 函数在 hicat 函数中重新使用。  
+
+我们使用 `limma` 计算 DE genes 的统计意义，其中两个关键参数指定如下：  
+**padj.th**: adjusted p value threshold for DE genes.  
+**lfc.th**: log2 fold change threshold for DE genes.  
+
+我们还要求 DE genes 具有相对 binary (on/off) 的表达模式，由以下参数指定：  
+**low.th**: 用于确定是否在给定细胞中检测到基因的最小值。
+此阈值适用于 log2-transformed, normalized data。默认值为 1。
+如有必要，用户可以为不同的基因指定不同的阈值。
+对于每一对 clusters (one as foreground, and the other as background)，我们定义了 q1 和 q2 作为分别在 foreground 和 background cluster 中表达大于 low.th  的细胞的比例。  
+**q1.th**：对于上调基因，q1 应该大于 foreground set 中的 q1.th。  
+**q2.th**：对于上调基因，q2 应该小于background set 中的 q2.th。  
+**q.diff.th**：差异，定义为 abs(q1 - q2)/max(q1, q2) 应大于 q.diff.th。  
+**默认值**：**q1.th** = 0.5, **q2.th** = NULL, **q.diff.th** = 0.7.  
+
+用户也可以通过将它们全部设置为 NULL 来忽略这些参数。  
+对于高深度数据集，例如使用 SMARTerV4 或 Smart-Seq2 生成的数据集，我们建议从 **q1.th** = 0.5 开始。  
+对于低深度数据集，例如使用 Dropseq 或 10X Genomics 生成的数据集，我们建议从 **q1.th** = 0.3 开始， 因为这些数据集中每个细胞的基因检测通常较低。  
+当关注离散细胞类型时，将 **q.diff.th** 设置为更接近 1。  
+如果对基于基因表达的分级或组合差异的细胞类型进行拆分感兴趣，请将 **q.diff.th** 调整为更接近 0。  
+
+为了根据 DE genes 确定两个 clusters 是否可分离，我们将 **de.score** 定义为所有 DE genes 的 -log10(adjusted Pvalue) 的总和。每个基因对总和的贡献最多为 20。所有 clusters 的 pairwise de.score 都应该大于 **de.score.th**。  
+对于小型数据集（#cells < 1000），我们建议 **de.score.th** = 40。  
+对于大型数据集（#cells > 10000），我们建议 **de.score.th** = 150。  
+
+**min.cells** 是每个 cluster 中允许的最小细胞数目。  
+**min.genes** 是分离 cluster 所需的差异表达基因的最小数量。  
+低于 min.cells 和 min.genes 的 Clusters 将与低维空间中最近的 Clusters 合并。
+
+## 2.2 Setting clustering parameters
+我们的演示数据集中有 284 个单细胞。根据上面的默认值和建议，尝试设置聚类参数。
+
+```{r}
+de.param <- de_param(padj.th     = 0.05, 
+                     lfc.th      = 1, 
+                     low.th      = 1, 
+                     q1.th       = 0.3,
+                     q2.th       = NULL,
+                     q.diff.th   = 0.7, 
+                     de.score.th = 40,
+                     min.cells   = 10,
+                     min.genes = 5)
+```
+
+
+--------------------------------------------------------------------------------
+
+
+# 3 Dimension Filtering
+可以使用我们称为 **rm.eigen** 的矩阵来指定在聚类过程中应该屏蔽的技术变化。
+如果存在批次效应，您可以使用批次特异性基因的第一主成分作为 **rm.eigen** 中的一列。  
+
+QC-related factors，例如测序深度、基因检测限制和比对到转录组的 reads 分数也往往与 基因表达的系统技术变异相关。  
+
+您可以直接使用这些 QC-related variables 的适当转换，或使用与这些 QC factors 相关
+的基因的第一主成分。后一种方法往往更适用于真实数据集。当指定 **rm.eigen** 时，聚
+类期间任何与 **rm.eigen** 的任何列具有大于 **rm.th** 的相关性的降维向量在聚类期间
+将被忽略。  
+
+我们建议用户首先通过运行 clustering pipeline 而不设置 **rm.eigen** 来探索他们的数据。
+如果任何批次特定或 QC-driven clusters 出现问题，用户可以创建 **rm.eigen** 如下所示，
+然后重新运行 pipeline。
+
+```{r}
+gene.counts <- colSums(norm.dat > 0)
+rm.eigen <- matrix(log2(gene.counts), ncol = 1)
+row.names(rm.eigen) <- names(gene.counts)
+colnames(rm.eigen) <- "log2GeneCounts"
+```
+
+
+--------------------------------------------------------------------------------
+
+
+# 4 Clustering
+## 4.1 Choosing a dimensionality reduction method
+`scrattch.hicat` 可以使用 **WGCNA** 或 **PCA** 进行聚类以进行降维。
+**WGCNA** 模式有利于检测稀有 clusters 并提供更清晰的 cluster 边界，而 **PCA** 更适合大型数据集，更有效地捕获组合标记表达模式，并且对低深度数据集更敏感。  
+
+我们建议对于较小的、高深度数据集 (< 4,000 samples; > 5,000 genes detecter per sample) 
+使用 **WGCNA**，对于大型或低覆盖数据集 (> 4,000 samples or < 5,000 genes detected 
+per sample) 使用 **PCA**。  
+
+另一个考虑因素是 **WGCNA** 比 **PCA** 慢得多。请注意，虽然整个 clustering pipeline  可以很好地随着细胞的数量而扩展，但运行时间在很大程度上取决于细胞类型的复杂性。
+也就是说，如果您的细胞非常多样化并继续分裂，则需要进一步的迭代才能达到终止标准。
+
+## 4.2 Coarse-level clustering
+首先，让我们使用 WGCNA 模式运行一轮聚类，使用高严格性检查广泛的细胞类型
+
+```{r}
+strict.param <- de_param(de.score.th = 500)
+
+onestep.result <- onestep_clust(norm.dat, 
+                                select.cells = select.cells, 
+                                dim.method = "pca", 
+                                de.param = strict.param, 
+                                rm.eigen = rm.eigen)
+```
+
+我们可以使用 `display_cl()` 函数绘制 DE Genes 的热图：
+
+```{r}
+display.result <- display_cl(onestep.result$cl, norm.dat, plot = TRUE, de.param = de.param)
+```
+我们可以在这里看到，样本根据许多差异表达的基因分成了两个大的亚类。
+
+## 4.3 Iteration for more detail
+接下来，我们将使用我们之前定义的更宽松的阈值 (**de.param**) 来寻找这些粗略 clusters 
+的更精细分割。这是通过运行 `iter_clust()` 函数来完成的。  
+
+`iter_clust()` 将执行迭代聚类，直到所有划分的 clusters 按照 **de.param** 中设置的标准的合并。  
+
+我们可以通过 `result` 参数向 `iter_clust()` 函数提供之前的单轮结果 (**onestep.result**)，从而避免从头开始：
+
+```{r}
+iter.result <- iter_clust(norm.dat, 
+                          select.cells = select.cells, 
+                          dim.method = "pca", 
+                          de.param = de.param, 
+                          rm.eigen = rm.eigen,
+                          result = onestep.result)
+```
+我们再次查看热图
+
+```{r}
+display.result <- display_cl(iter.result$cl, norm.dat, plot = TRUE, de.param = de.param)
+```
+在这里，我们可以在图的顶部看到其他 clusters 的标签。您可以看到一些具有单独颜色条
+的 clusters，但它们之间没有分界线。这些 clusters 已根据 `de.param()` 设置合并。
+下一节将对此进行更多介绍。
+
+## 4.4 Experimenting with parameters
+要查看 `de_param()` 设置的各种参数如何影响聚类结果，请按照下面尝试使用一些不同的
+设置运行 `onestep_clust()` 函数。您还可以尝试将 **WGCNA** 和 **PCA** 作为 dim.method 
+参数进行比较。
+
+```{r}
+dim.method <- "WGCNA"
+
+explore.param <- de_param(padj.th     = 0.05, 
+                          lfc.th      = 1, 
+                          low.th      = 1, 
+                          q1.th       = 0.5,
+                          q2.th       = NULL,
+                          q.diff.th   = 0.7, 
+                          de.score.th = 40)
+
+explore.result <- onestep_clust(norm.dat, 
+                                select.cells = select.cells, 
+                                dim.method = dim.method, 
+                                de.param = explore.param, 
+                                rm.eigen = rm.eigen)
+
+display.result <- display_cl(explore.result$cl, 
+                             norm.dat, 
+                             plot = TRUE, 
+                             de.param = explore.param)
+```
+
+
+--------------------------------------------------------------------------------
+
+
+# 5 Merging and comparison
+## 5.1 Merging clusters
+在 `iter_clust()` 执行的迭代聚类过程中，该函数检查任何迭代的聚类是否可以被 DEG 分离。
+但是，来自不同迭代的 clusters 最终可能非常相似。因此，最终有必要检查所有 clusters 
+是否可以通过 DEG 分离。  
+
+Clusters 按照最近邻的 pairs of clusters 定义的顺序合并，这些 clusters 在由 **rd.dat** 
+定义的降维空间中计算。  
+
+在这里，我们使用由 `iter_clust()` 生成的一组 markers 来定义降维。出于演示的目的，
+我们将增加 **de.param** 设置的严格性以合并相似的 clusters。
+
+```{r}
+rd.dat <- t(norm.dat[iter.result$markers, select.cells])
+
+merge.param <- de_param(de.score.th = 70) # The original value was 40.
+
+merge.result <- merge_cl(norm.dat, 
+                         cl = iter.result$cl, 
+                         rd.dat = rd.dat,
+                         de.param = merge.param)
+
+display.result <- display_cl(merge.result$cl, 
+                             norm.dat, 
+                             plot = TRUE, 
+                             de.param = merge.param)
+```
+让我们使用 `compare_annotate()` 函数比较合并前和合并后的 clusters，看看哪些合并了：
+
+```{r}
+# Set up the cl and cl.df objects for use with compare_annotate()
+iter.cl <- setNames(as.factor(iter.result$cl), select.cells)
+iter.cl.df <- data.frame(cluster_id = unique(iter.cl),
+                            cluster_label = paste0("Pre-merge_cl_",unique(iter.cl)),
+                            cluster_color = rainbow(length(unique(iter.cl))))
+rownames(iter.cl.df) <- iter.cl.df$cluster_id
+
+compare.result <- compare_annotate(merge.result$cl, iter.cl, iter.cl.df)
+compare.result$g
+```
+现在，我们可以看到 2 个原始 clusters 被合并回一个合并的 Cluster4。
+
+## 5.2 Comparison to reference clusters
+在这个演示中，我们之前从 Tasic, et al., 2016 中获得了 cluster 标签。要查看这些 
+cluster 标签与 `scrattch.hicat` 生成的 cluster 标签如何匹配，我们可以根据 reference 
+cluster annotation 来比较和注释 cluster。
+```{r}
+# Generate comparison
+compare.result <- compare_annotate(iter.result$cl, ref.cl, ref.cl.df)
+# Output the plot
+compare.result$g
+```
+```{r}
+# Get cl factors and data.frame 
+cl <- compare.result$cl
+cl.df <- compare.result$cl.df
+```
+
+请注意，我们的聚类与参考聚类不同。特别是，原始的 Ndnf Cxcl14 被分成两个clusters，
+其中一个 clusters 还包含来自 Vip Gpc3 clusters 的细胞。  
+
+现在让我们计算每对 clusters 之间的 DE genes。为了生成这个热图，我们使用了top 20 
+DE genes。如果您有许多 clusters，则热图可能太大而无法显示，这可能需要较低的 n.markers 
+参数设置。  
+
+```{r}
+display.result <- display_cl(cl, 
+                             norm.dat, 
+                             plot=TRUE, 
+                             de.param = de.param,
+                             n.markers = 20)
+```
+```{r}
+de.genes <- display.result$de.genes
+```
+
+此时，我们可以检查热图以手动检查 clusters 中是否存在奇怪的分组、doublets 或异常值。
+
+
+--------------------------------------------------------------------------------
+
+
+# 6 Bootstrapping and Consensus
+迭代聚类 pipeline 往往会产生许多 clusters，当我们尝试以更精细的分辨率拆分 clusters 时，会增加不确定性。  
+
+我们通过对 80% 的随机 subsampled 细胞执行多次聚类来解决这个问题， 跟踪每个细胞与其他细胞聚类的频率(细胞-细胞共聚类矩阵)，并使用细胞-细胞共聚类的这
+些频率来推断 consensus clustering。我们还计算统计数据来评估我们对每对 consensus 
+clusters 之间分离的置信度。  
+
+`run_consensus_clust()` 是一个方便的包装函数，用于执行这个引导的、迭代的聚类过程。  
+
+为了更快地执行，我们使用“PCA”模式。
+
+```{r}
+set.seed(12345)
+result <- run_consensus_clust(norm.dat[,select.cells], 
+                              select.cells = select.cells,
+                              niter = 100, 
+                              de.param = de.param, 
+                              rm.eigen = rm.eigen, 
+                              dim.method = "pca", 
+                              output_dir = "subsample_PCA")
+```
+
+同样，我们将使用 `compare_annotate()` 将这些结果与参考进行比较。
+
+```{r}
+compare.result <- compare_annotate(result$cl.result$cl, ref.cl, ref.cl.df)
+compare.result$g
+```
+这些聚类结果不是直接从基因 x 样本测量中得出的，而是根据细胞在同一 cluster 中一起
+发现的频率得出的。我们可以使用 `plot_co_matrix()` 查看这个联合聚类矩阵：
+
+```{r}
+consensus.cl <- compare.result$cl
+consensus.cl.df <- compare.result$cl.df
+
+co.ratio <- result$co.result$cl.mat
+co.matrix.plot <- plot_co_matrix(co.ratio, 
+                                 consensus.cl, 
+                                 max.cl.size = 50)
+```
+在这里，我们可以看到共聚类矩阵的块结构。  
+最后，我们可以删除因子级别，以获得每个细胞的 cluster 结果对象，以便与其他函数一起使用。
+
+```{r}
+cl.clean <- droplevels(consensus.cl)
+
+head(cl.clean)
+```
+
+## 6.1 Scaling with parallel computation
+如果您有一台多核计算机，则可以通过将 **mc.cores** 设置为您可以使用的内核数来并行
+运行此功能。  
+请注意，这可能会导致大量并行进程的高内存消耗。尝试先使用少量内核来监控内存消耗：
+
+```{r}
+result <- run_consensus_clust(norm.dat, 
+                              niter = 20, 
+                              de.param = de.param, 
+                              rm.eigen = rm.eigen, 
+                              dim.method = "PCA", 
+                              output_dir = "subsample_PCA", 
+                              mc.cores = 4)
+```
+
+
+--------------------------------------------------------------------------------
+
+
+# 7 Dendrograms and t-SNE
+## 7.1 Representing hierarchies with dendrograms
+我们发现使用层次结构对不同分辨率的细胞类型进行分类很有帮助。为了构建 clusters 的
+树状图，我们使用基于 `select_markers()` 和 `build_dend()` 筛选的在每对 clusters 
+之间中位数表达值差异最大的 top50 基因的相关矩阵。  
+
+可以使用 `pvclust` 包实现的引导方法估计每个分支点的置信度，该包由 `build_dend()` 
+函数自动调用：
+
+```{r}
+select.markers <- select_markers(norm.dat, 
+                                cl.clean, 
+                                de.genes = de.genes,
+                                n.markers = 50)
+
+marker.genes <- select.markers$markers
+de.genes <- select.markers$de.genes
+
+cl.med <- get_cl_medians(norm.dat[marker.genes,], 
+                         cl.clean)
+
+##The prefered order for the leaf nodes.
+l.rank <- setNames(1:nrow(consensus.cl.df), 
+                   row.names(consensus.cl.df))
+
+##Color of the leaf nodes.
+l.color <- setNames(as.character(consensus.cl.df$cluster_color), row.names(consensus.cl.df))
+
+# Build the dendrogram
+dend.result <- build_dend(cl.med[,levels(cl.clean)],
+                          l.rank, 
+                          l.color,
+                          nboot = 100)
+dend <- dend.result$dend
+###attach cluster labels to the leaves of the tree 
+dend.labeled <- dend
+labels(dend.labeled) <- consensus.cl.df[labels(dend), "cluster_label"]
+plot(dend.labeled)
+```
+现在，我们可以更好地看到 clusters 的层次结构，这种层次结构的置信度分数由线条的权
+重和颜色表示，粗黑线最有置信度，红线居中，灰线置信度较低。  
+
+我们可以使用 dendrogram 结构对 cluster 进行重新排序，以便在其他图中使用：
+
+```{r}
+cl.clean <- setNames(factor(as.character(cl.clean), levels = labels(dend)), names(cl.clean))
+cl.df.clean <- cl.df[levels(cl.clean),]
+```
+
+我们还可以绘制用于反应层次聚类的聚类级别的相关矩阵：
+
+```{r}
+cl.cor <- dend.result$cl.cor
+row.names(cl.cor) <- colnames(cl.cor) <- consensus.cl.df[row.names(cl.cor), "cluster_label"]
+heatmap.3(cl.cor,
+          Rowv = dend, Colv = dend,
+          trace = "none", col = heat.colors(100),cexRow=0.8, cexCol=0.8,
+          breaks = c(-0.2, 0.2, seq(0.2, 1, length.out = 99)))
+```
+
+## 7.2 t-SNE plots
+将我们的高维数据集投影到二维是检查细胞类型聚类的非常有用的方法。t-SNE 是一种流行 的方法，它可以很好地将相似的细胞分组在一起，并将非常不同的细胞分开。  
+
+我们可以使用函数 `plot_tsne_cl()` 在图上生成 t-SNE 坐标和覆盖 cluster 标签：
+
+```{r}
+tsne.result <- plot_tsne_cl(norm.dat, marker.genes, consensus.cl, consensus.cl.df, fn.size=5, cex=1)
+```
+
+```{r}
+tsne.df <- tsne.result$tsne.df
+tsne.result$g
+```
+或者，我们可以使用 `plot_tsne_gene()` 在 t-SNE 坐标上绘制一组基因的表达：
+
+```{r}
+tsne.df <- tsne.result$tsne.df
+## 6330527O06Rik is alias for Lamp5, and A930038C07Rik is alais for Ndnf
+markers <- c("Vip","6330527O06Rik","Sncg","Cxcl14","Gpc3","A930038C07Rik")
+gene.plots <- plot_tsne_gene(tsne.df, norm.dat, markers)
+multiplot(plotlist = gene.plots, cols = 3)
+```
+
+
+--------------------------------------------------------------------------------
+
+
+# 8 Mapping between datasets
+`scrattch.hicat` 还提供了一些跨数据集映射的函数。例如，您可能希望使用来自 SMART-seq 数据集的先前注释类型来注释 10X Genomics 数据中的细胞。  
+
+为了演示，我们将展示如何从几个 Patch-seq 细胞中获取数据，这些细胞往往有些噪声，并
+将它们注册到我们的 Tasic, et al. (2016) clusters。  
+
+此 Patch-seq 数据来自 Cadwell, et al (2016)，该数据通过在膜片钳电生理记录后提取 
+scRNA-seq 的细胞内容物，分析了小鼠皮层 L1 中相同细胞的电生理学、形态学和转录组学。  
+
+对于这个演示，我们已经加载了一个矩阵，其中包含其中 10 个细胞的转录组数据 (as cadwell_2016_data)。  
+
+我们可以使用 `map_sampling()` 函数映射这些细胞，该函数使用参考数据集训练一个质心分类器， 其中随机选择 80% 的标记基因，然后将测试数据与参考集匹配。这是自举 100 次以获得对
+分类稳健性的估计。
+
+```{r}
+marker_results <- select_markers(norm.dat, ref.cl)
+marker_genes <- marker_results$markers
+
+norm.cadwell_2016_data <- log2(cpm(cadwell_2016_data) + 1)
+
+mapping_results <- map_sampling(train.dat    = norm.dat,
+                                train.cl     = ref.cl,
+                                test.dat     = norm.cadwell_2016_data,
+                                markers      = marker_genes,
+                                markers.perc = 0.8,
+                                iter         = 100)
+```
+这将返回一个具有最佳匹配的表和一个表，其中包含每个细胞分配给每个 cluster 的频率。
+
+```{r}
+mapping_results$map.df
+mapping_results$map.freq
+```
+
+我们可以加入我们在教程开始时生成的 ref.cl.df，以添加来自 Tasic, et al. (2016) 的
+现有注释。
+
+```{r}
+map.df <- mapping_results$map.df %>%
+  mutate(pred.cl = as.numeric(as.character(pred.cl))) %>%
+  left_join(ref.cl.df, by = c("pred.cl" = "cluster_id"))
+
+map.df
+
+```
+
+```{r}
+table(map.df$cluster_label)
+```
+
+由此，我们可以看到大多数细胞映射到 Smad3 或 Ndnf clusters，它们对应于 L1 神经胶
+质状中间神经元。这与 Cadwell, et al. (2016) 提出的这些细胞的位置、形态和电生理学
+非常匹配。
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,476 @@
+---
+title: "Tutorials for the WGCNA package"
+author: "TigerZ"
+date: "2022-10-25"
+output: 
+  html_notebook: 
+    toc: yes
+---
+
+下载tutorial数据：
+[zipped data sets](https://horvath.genetics.ucla.edu/html/CoexpressionNetwork/Rpackages/WGCNA/Tutorials/FemaleLiver-Data.zip)  
+导入相关package：
+```{r}
+library(WGCNA)
+```
+
+# 1 Data input, cleaning and pre-processing
+## 1.a Loading expression data
+表达量数据包含在本教程附带的文件 LiverFemale3600.csv 中。
+```{r}
+# Read in the female liver data set
+femData = read.csv("./FemaleLiver-Data/LiverFemale3600.csv")
+# Take a quick look at what is in the data set:
+dim(femData)
+```
+
+行为gene，列为sample和其他信息，表达量数据集包含 135 个样本。
+```{r}
+head(femData)
+```
+
+我们现在删除辅助数据并转置表达数据以进行进一步分析：
+datExpr0 行为135个样本，列为3600个gene
+```{r}
+datExpr0 = as.data.frame(t(femData[, -c(1:8)]))
+colnames(datExpr0) = femData$substanceBXH
+rownames(datExpr0) = colnames(femData)[-c(1:8)]
+dim(datExpr0)
+```
+
+## 1.b 检查数据是否有过度的缺失值和识别离群值
+我们首先检查缺失值过多的基因和样本：
+```{r}
+gsg = goodSamplesGenes(datExpr0, verbose = 3)
+gsg$allOK
+```
+
+如果gsg$allOK的结果为TRUE，证明没有缺失值，可以直接下一步。如果为FALSE，则需要用以下函数进行删除缺失值。
+```{r}
+if (!gsg$allOK){
+  # Optionally, print the gene and sample names that were removed:
+  if (sum(!gsg$goodGenes)>0)
+  printFlush(paste("Removing genes:", paste(names(datExpr0)[!gsg$goodGenes], collapse = ", ")));
+  if (sum(!gsg$goodSamples)>0)
+  printFlush(paste("Removing samples:", paste(rownames(datExpr0)[!gsg$goodSamples], collapse = ", ")));
+  # Remove the offending genes and samples from the data:
+  datExpr0 = datExpr0[gsg$goodSamples, gsg$goodGenes]
+}
+```
+
+接下来我们对样本进行聚类,以查看是否有任何明显的异常值
+```{r}
+sampleTree = hclust(dist(datExpr0), method = "average");
+# Plot the sample tree: Open a graphic output window of size 12 by 9 inches
+# The user should change the dimensions if the window is too large or too small.
+sizeGrWindow(12,9)
+#pdf(file = "Plots/sampleClustering.pdf", width = 12, height = 9);
+par(cex = 0.6);
+par(mar = c(0,4,2,0))
+plot(sampleTree, main = "Sample clustering to detect outliers", sub="", xlab="", 
+     cex.lab = 1.5,cex.axis = 1.5, cex.main = 2)
+```
+
+如果有离群值，则要删去离群的样本，如果没有则跳过下一步。
+```{r}
+# Plot a line to show the cut
+#abline(h = 15, col = "red");
+# Determine cluster under the line
+clust = cutreeStatic(sampleTree, cutHeight = 15, minSize = 10)
+table(clust)
+# clust 1 contains the samples we want to keep.
+keepSamples = (clust==1)
+datExpr = datExpr0[keepSamples, ]
+nGenes = ncol(datExpr)
+nSamples = nrow(datExpr)
+```
+
+## 1.c Loading clinical trait data
+我们现在读入表型数据,并将它们与表达量样本匹配
+```{r}
+traitData = read.csv("./FemaleLiver-Data/ClinicalTraits.csv");
+# remove columns that hold information we do not need.
+allTraits = traitData[, -c(31, 16)];
+allTraits = allTraits[, c(2, 11:36) ];
+# Form a data frame analogous to expression data that will hold the clinical traits.
+femaleSamples = rownames(datExpr);
+traitRows = match(femaleSamples, allTraits$Mice)
+datTraits = allTraits[traitRows, -1]
+rownames(datTraits) = allTraits[traitRows, 1]
+collectGarbage()
+```
+
+我们现在在变量 datExpr 中有表达量数据，在变量 datTraits 中有相应的表型数据。 在我们继续网络构建和模块检测之前，我们将表型与样本树状图的关系可视化。
+```{r fig.height=3, fig.width=6}
+# Re-cluster samples
+sampleTree2 = hclust(dist(datExpr), method = "average")
+# Convert traits to a color representation: white means low, red means high, grey means missing entry
+traitColors = numbers2colors(datTraits, signed = FALSE);
+# Plot the sample dendrogram and the colors underneath.
+plotDendroAndColors(sampleTree2, traitColors, groupLabels = names(datTraits),
+                    main = "Sample dendrogram and trait heatmap")
+```
+
+最后一步是保存相关的表达式和特征数据，以便在教程的后续步骤中使用。
+```{r}
+save(datExpr, datTraits, file = "FemaleLiver-01-dataInput.RData")
+```
+
+
+
+# 2 Automatic construction of the gene network and identification of modules
+参数设置
+```{r}
+# 开启多线程
+enableWGCNAThreads()
+# 载入第一步保存的数据
+lnames = load(file = "FemaleLiver-01-dataInput.RData");
+lnames
+```
+
+## 2.a Automatic network construction and module detection
+### 2.a.1 Choosing the soft-thresholding power: analysis of network topology
+选择软阈值
+```{r fig.height=2, fig.width=4}
+# Choose a set of soft-thresholding powers
+powers = c(c(1:10), seq(from = 12, to=20, by=2))
+# Call the network topology analysis function
+sft = pickSoftThreshold(datExpr, powerVector = powers, verbose = 5)
+# Plot the results:
+sizeGrWindow(9, 5)
+par(mfrow = c(1,2))
+cex1 = 0.9;
+# Scale-free topology fit index as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2], 
+     xlab="Soft Threshold (power)", ylab="Scale Free Topology Model Fit,signed R^2",
+     type="n", main = paste("Scale independence"));
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     labels=powers,cex=cex1,col="red");
+# this line corresponds to using an R^2 cut-off of h
+abline(h=0.90,col="red")
+# Mean connectivity as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], sft$fitIndices[,5], xlab="Soft Threshold (power)",
+     ylab="Mean Connectivity", type="n", main = paste("Mean connectivity"))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
+```
+左图，无标度拓扑拟合指数，是用来选择软阈值的一个根据。我们一般选择在0.9以上的，
+第一个达到0.9以上数值。左图的6是第一个达到0.9的数值，可以考虑6作为软阈值。
+如果在0.9以上就没有数值了，我们就要降低标准，但是最低不能小于0.8。  
+右图，平均连接度，数值为6的时候，已经开始持平，则软阈值为6时，网络的连通性好。  
+运行下面的代码，如果有合适的软阈值，系统会自动推荐给你:
+```{r}
+sft$powerEstimate
+```
+如果显示的结果为 NA，则表明系统无法给出合适的软阈值，这时候就需要自己挑选软阈值。
+手动挑选软阈值的大致规则如上面所述。
+
+### 2.a.2 One-step network construction and module detection
+构建基因网络和识别模块现在是一个简单的函数调用：
+```{r}
+net = blockwiseModules(datExpr, power = 6, TOMType = "unsigned", minModuleSize = 30,
+                       reassignThreshold = 0, mergeCutHeight = 0.25, numericLabels = TRUE,
+                       pamRespectsDendro = FALSE, saveTOMs = TRUE,
+                       saveTOMFileBase = "femaleMouseTOM", verbose = 3)
+# 参数解释
+# power = 6是刚才选择的软阈值
+# minModuleSize：模块中最少的基因数
+# mergeCutHeight：模块合并阈值，阈值越大，模块越少
+# saveTOMs = TRUE,saveTOMFileBase = "femaleMouseTOM"保存TOM矩阵，名字为"femaleMouseTOM"
+# net$colors 包含模块分配，net$MEs 包含模块的模块特征基因。
+```
+
+```{r}
+table(net$colors)
+```
+以上结果表示一共可以分为18个模块，模块0是无法识别的基因,从模块1开始，基因数逐渐减少。
+
+模块标识的层次聚类树状图，可以使用以下代码将树状图与颜色分配一起显示：
+```{r}
+sizeGrWindow(12, 9)
+mergedColors = labels2colors(net$colors)
+plotDendroAndColors(net$dendrograms[[1]], mergedColors[net$blockGenes[[1]]],
+                    "Module colors",
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05)
+```
+如果需要修改树、模块成员、和模块合并标准，该包的recutBlockwiseTrees函数可以对结果进行修改，而无需重复计算网络和树状图。（推荐用第二种方法分步法实现）
+
+保存分配模块和模块包含的基因信息。
+```{r}
+moduleLabels = net$colors
+moduleColors = labels2colors(net$colors)
+MEs = net$MEs;
+geneTree = net$dendrograms[[1]];
+save(MEs, moduleLabels, moduleColors, geneTree,
+     file = "FemaleLiver-02-networkConstruction-auto.RData")
+```
+
+
+## 2.b Step-by-step network construction and module detection
+导入前期数据
+```{r}
+lnames = load(file = "FemaleLiver-01-dataInput.RData");
+lnames
+```
+
+### 2.b.1 Choosing the soft-thresholding power: analysis of network topology
+软阈值选择
+```{r fig.height=2, fig.width=4}
+# Choose a set of soft-thresholding powers
+powers = c(c(1:10), seq(from = 12, to=20, by=2))
+# Call the network topology analysis function
+sft = pickSoftThreshold(datExpr, powerVector = powers, verbose = 5)
+# Plot the results:
+sizeGrWindow(9, 5)
+par(mfrow = c(1,2));
+cex1 = 0.9;
+# Scale-free topology fit index as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+main = paste("Scale independence"));
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+labels=powers,cex=cex1,col="red");
+# this line corresponds to using an R^2 cut-off of h
+abline(h=0.90,col="red")
+# Mean connectivity as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+main = paste("Mean connectivity"))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
+```
+
+## 2.b.2 Co-expression similarity and adjacency
+```{r}
+softPower = 6;
+adjacency = adjacency(datExpr, power = softPower);
+```
+
+## 2.b.3 Topological Overlap Matrix (TOM)
+```{r}
+# Turn adjacency into topological overlap
+TOM = TOMsimilarity(adjacency);
+dissTOM = 1-TOM
+```
+
+## 2.b.4 Clustering using TOM
+我们现在使用层次聚类来产生一个基因的层次聚类树（树状图）。注意，我们使用了函数hclust，它提供了比标准hclust函数更快的层次聚类例程。
+```{r}
+# Call the hierarchical clustering function
+geneTree = hclust(as.dist(dissTOM), method = "average");
+# Plot the resulting clustering tree (dendrogram)
+sizeGrWindow(12,9)
+plot(geneTree, xlab="", sub="", main = "Gene clustering on TOM-based dissimilarity",
+labels = FALSE, hang = 0.04);
+```
+
+在聚类树（树状图）中，每一片叶子，即一条短的垂直线，对应着一个基因。树状图的各个
+分支聚集在一起，紧密相连，高度共表达的基因。模块识别相当于识别单个分支（“切断树状
+图上的分支”）。分支切割有几种方法；我们的标准方法是使用 dynamicTreeCut 动态树切割。下一个代码片段说明了它的使用。
+```{r}
+# We like large modules, so we set the minimum module size relatively high:
+minModuleSize = 30;
+# Module identification using dynamic tree cut:
+dynamicMods = cutreeDynamic(dendro = geneTree, distM = dissTOM, deepSplit = 2,
+                            pamRespectsDendro=FALSE, minClusterSize=minModuleSize);
+table(dynamicMods)
+```
+
+该函数返回22个模块，标记为1-22个最大到最小。标签0被保留给未分配的基因。上面的命令列出了这些模块的大小。我们现在在基因树状图下绘制模块分配：
+```{r}
+# Convert numeric lables into colors
+dynamicColors = labels2colors(dynamicMods)
+table(dynamicColors)
+# Plot the dendrogram and colors underneath
+sizeGrWindow(8,6)
+plotDendroAndColors(geneTree, dynamicColors, "Dynamic Tree Cut",
+dendroLabels = FALSE, hang = 0.03,
+addGuide = TRUE, guideHang = 0.05,
+main = "Gene dendrogram and module colors")
+```
+
+## 2.b.5 Merging of modules whose expression profiles are very similar
+动态树剪切可以识别其表达式配置文件非常相似的模块。合并这些模块可能是谨慎的，
+因为它们的基因是高度共表达的。为了量化整个模块的共表达相似性，我们计算了它们的
+特征基因，并对它们的相关性进行了聚类：
+```{r}
+# Calculate eigengenes
+MEList = moduleEigengenes(datExpr, colors = dynamicColors)
+MEs = MEList$eigengenes
+# Calculate dissimilarity of module eigengenes
+MEDiss = 1-cor(MEs);
+# Cluster module eigengenes
+METree = hclust(as.dist(MEDiss), method = "average");
+# Plot the result
+sizeGrWindow(7, 6)
+plot(METree, main = "Clustering of module eigengenes", xlab = "", sub = "")
+```
+
+我们选择一个0.25的高度切割，对应的相关性为0.75，进行合并
+```{r}
+plot(METree, main = "Clustering of module eigengenes", xlab = "", sub = "")
+MEDissThres = 0.25
+# Plot the cut line into the dendrogram
+abline(h=MEDissThres, col = "red")
+# Call an automatic merging function
+merge = mergeCloseModules(datExpr, dynamicColors, cutHeight = MEDissThres, verbose = 3)
+# The merged module colors
+mergedColors = merge$colors;
+# Eigengenes of the new merged modules:
+mergedMEs = merge$newMEs;
+```
+
+为了了解合并对我们的模块颜色做了什么，我们再次绘制了基因树状图，下面是原始的和合
+并的模块颜色
+```{r}
+sizeGrWindow(12, 9)
+#pdf(file = "Plots/geneDendro-3.pdf", wi = 9, he = 6)
+plotDendroAndColors(geneTree, cbind(dynamicColors, mergedColors),
+c("Dynamic Tree Cut", "Merged dynamic"),
+dendroLabels = FALSE, hang = 0.03,
+addGuide = TRUE, guideHang = 0.05)
+#dev.off()
+```
+
+在随后的分析中，我们将在合并的颜色中使用合并的模块颜色。我们将相关变量保存在本教
+程的后续部分中使用：
+```{r}
+# Rename to moduleColors
+moduleColors = mergedColors
+# Construct numerical labels corresponding to the colors
+colorOrder = c("grey", standardColors(50));
+moduleLabels = match(moduleColors, colorOrder)-1;
+MEs = mergedMEs;
+# Save module colors and labels for use in subsequent parts
+save(MEs, moduleLabels, moduleColors, geneTree, file = "FemaleLiver-02-networkConstruction-stepByStep.RData")
+```
+
+
+
+
+# 3 Relating modules to external clinical traits
+参数设置与载入之前的分析结果:
+```{r}
+load(file = "FemaleLiver-01-dataInput.RData");
+load(file = "FemaleLiver-02-networkConstruction-auto.RData")
+```
+
+## 3.a Quantifying module–trait associations
+在这项分析中，我们希望确定与测量的临床特征显著相关的模块。由于我们已经为每个模块
+有了一个概要文件（特征基因），我们只是简单地将特征基因与外部特征联系起来，并寻找
+最重要的关联：
+```{r}
+# Define numbers of genes and samples
+nGenes = ncol(datExpr);
+nSamples = nrow(datExpr);
+# Recalculate MEs with color labels
+MEs0 = moduleEigengenes(datExpr, moduleColors)$eigengenes
+MEs = orderMEs(MEs0)
+moduleTraitCor = cor(MEs, datTraits, use = "p");
+moduleTraitPvalue = corPvalueStudent(moduleTraitCor, nSamples);
+```
+
+由于我们有相当数量的模块和特征，一个合适的图形表示将有助于读取表。我们用相关值为
+每个关联进行颜色编码：
+```{r fig.height=3, fig.width=4}
+sizeGrWindow(10,6)
+# 展示模块与表型数据的相关系数和 P值
+textMatrix = paste(signif(moduleTraitCor, 2), "\n(",
+                   signif(moduleTraitPvalue, 1), ")", sep = "");
+dim(textMatrix) = dim(moduleTraitCor)
+par(mar = c(6, 8.5, 3, 3));
+# 用热图的形式展示相关系数
+labeledHeatmap(Matrix = moduleTraitCor,
+               xLabels = names(datTraits),
+               yLabels = names(MEs),
+               ySymbols = names(MEs),
+               colorLabels = FALSE,
+               colors = greenWhiteRed(50),
+               textMatrix = textMatrix,
+               setStdMargins = FALSE,
+               cex.text = 0.5,
+               zlim = c(-1,1),
+               main = paste("Module-trait relationships"))
+#colors = greenWhiteRed(50)不适用于红绿色盲患者，建议用 blueWhiteRed代替.
+#该分析确定了几个重要的模块-特征关联。我们将体重作为感兴趣的特征来研究。
+```
+
+该分析确定了几个重要的模块-特征关联。我们将集中精力体重作为兴趣的特征。
+
+## 3.b Gene relationship to trait and important modules: Gene Significance and Module Membership
+我们通过定义 Gene Significance(GS) 为 gene 和 trait 的相关性，来量化单个基因与我们感兴趣的性状（体重weight）的关联。对于每个模块，我们定义 module membership(MM) 为 module eigengene 和 gene expression profile 的相关性。这使得我们能够量化阵列上的所有基因与每个模块的相似性。
+```{r}
+# Define variable weight containing the weight column of datTrait
+weight = as.data.frame(datTraits$weight_g);
+names(weight) = "weight"
+# names (colors) of the modules
+modNames = substring(names(MEs), 3)
+geneModuleMembership = as.data.frame(cor(datExpr, MEs, use = "p"));
+MMPvalue = as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership), nSamples));
+names(geneModuleMembership) = paste("MM", modNames, sep="");
+names(MMPvalue) = paste("p.MM", modNames, sep="");
+geneTraitSignificance = as.data.frame(cor(datExpr, weight, use = "p"));
+GSPvalue = as.data.frame(corPvalueStudent(as.matrix(geneTraitSignificance), nSamples));
+names(geneTraitSignificance) = paste("GS.", names(weight), sep="");
+names(GSPvalue) = paste("p.GS.", names(weight), sep="")
+```
+
+
+## 3.c Intramodular analysis: identifying genes with high GS and MM
+使用GS和MM测量方法，我们可以识别出对于 weight 有高显著性，并在感兴趣的模块中具有高模块成员身份的基因。作为一个例子，我们来看看与体重关联最高的棕色模块。
+```{r fig.height=2, fig.width=2}
+module = "brown"
+column = match(module, modNames);
+moduleGenes = moduleColors==module;
+sizeGrWindow(7, 7);
+par(mfrow = c(1,1));
+verboseScatterplot(abs(geneModuleMembership[moduleGenes, column]),
+                   abs(geneTraitSignificance[moduleGenes, 1]),
+                   xlab = paste("Module Membership in", module, "module"),
+                   ylab = "Gene significance for body weight",
+                   main = paste("Module membership vs. gene significance\n"),
+                   cex.main = 1.2, cex.lab = 1.2, cex.axis = 1.2, col = module)
+```
+
+如上图所示。显然，GS和MM是高度相关的，这说明与一个性状高度显著相关的基因通常也是
+与该性状相关的模块中最重要的（中心）元素。我们鼓励读者尝试这个具有其他显著性特征/模块相关性的代码（例如，洋红色、午夜蓝色和红色模块的重量）。
+
+## 3.d Summary output of network analysis results
+我们已经发现了与我们感兴趣的特征有高度相关的模块，并通过模块成员度度量确定了它们
+的核心参与者。我们现在将这些统计信息与基因注释合并，并写出一个总结最重要结果的文件，
+可以在标准电子表格软件如MS Excel或Open Office Calc中进行检查。
+我们的表达量数据只用探针ID名称进行注释：命令
+```{r}
+#names(datExpr)#会返回所有在分析中的基因ID
+#names(datExpr)[moduleColors=="brown"]#返回属于棕色模块的基因ID
+annot = read.csv(file = "./FemaleLiver-Data/GeneAnnotation.csv");
+dim(annot)
+names(annot)
+probes = names(datExpr) # 匹配信息
+probes2annot = match(probes, annot$substanceBXH);
+sum(is.na(probes2annot)) # 检测是否有没有匹配上的ID号，正常来说为0，即全匹配上了。输出必要的信息：
+geneInfo0 = data.frame(substanceBXH = probes,
+                       geneSymbol = annot$gene_symbol[probes2annot],
+                       LocusLinkID = annot$LocusLinkID[probes2annot],
+                       moduleColor = moduleColors,
+                       geneTraitSignificance,
+                       GSPvalue);
+ #按照与体重的显著水平将模块进行排序:
+ modOrder = order(-abs(cor(MEs, weight, use = "p")));
+ #添加模块成员的信息：
+ for (mod in 1:ncol(geneModuleMembership))
+{
+  oldNames = names(geneInfo0)
+  geneInfo0 = data.frame(geneInfo0, geneModuleMembership[, modOrder[mod]],
+                         MMPvalue[, modOrder[mod]]);
+  names(geneInfo0) = c(oldNames, paste("MM.", modNames[modOrder[mod]], sep=""),
+                       paste("p.MM.", modNames[modOrder[mod]], sep=""))
+}
+geneOrder = order(geneInfo0$moduleColor, -abs(geneInfo0$GS.weight));  # 排序
+geneInfo = geneInfo0[geneOrder, ]
+#输出为CSV格式，可用fix(geneInfo)在R中查看：
+write.csv(geneInfo, file = "geneInfo.csv")
+```
+
+
+
+

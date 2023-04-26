@@ -1,0 +1,215 @@
+---
+title: "Constructing single-cell trajectories"
+output: 
+  html_notebook: 
+    toc: yes
+    css: F:/Github/learn/R/notebook.css
+    number_sections: yes
+---
+
+在发育过程中，为了响应刺激，以及在整个生命过程中，细胞从一种功能“状态”转变为另一种功能“状态”。处于不同状态的细胞表达不同的基因组，产生动态的蛋白质和代谢物库来执行它们的工作。当细胞在状态之间移动时，它们会经历转录重新配置的过程，其中一些基因被沉默，而另一些则被新激活。这些瞬态通常很难表征，因为在更稳定的终点状态之间纯化细胞可能很困难或不可能。scRNAseq 无需纯化即可让您看到这些状态。然而，为此，我们必须确定每个细胞在可能状态范围内的位置。
+
+Monocle 介绍了使用 RNA-Seq 进行单细胞轨迹分析的策略。Monocle 不是通过实验将细胞纯化为离散状态，而是使用一种算法来了解每个细胞作为动态生物过程的一部分必须经历的基因表达变化的顺序。一旦了解了基因表达变化的总体“轨迹”，Monocle 就可以将每个细胞置于轨迹中的适当位置。然后，您可以使用 Monocle 的差异分析工具包来查找在轨迹过程中受调节的基因，这一分析过程在 [Finding genes that change as a function of pseudotime](https://cole-trapnell-lab.github.io/monocle3/docs/differential/#pseudo-dep) 中介绍。如果该过程有多个结果，Monocle 将重建一个“分支”轨迹。这些分支对应于细胞的“决定”，而 Monocle 提供了强大的工具来识别受它们影响并参与制定它们的基因。您可以在 [Analyzing branches in single-cell trajectories](https://cole-trapnell-lab.github.io/monocle3/docs/differential/#branches) 部分查看如何分析分支。
+
+重建轨迹的工作流程与聚类的工作流程非常相似，但它有几个额外的步骤。为了说明工作流程，我们将使用另一个 C. elegans 数据集，这个数据集来自 [Packer & Zhu et al](https://dx.doi.org/10.1101/565549)。他们的研究包括对整个发育胚胎的时间序列分析。我们将检查一小部分数据，其中包括大部分神经元。我们将像处理 L2 数据一样加载它：
+
+```{r}
+expression_matrix <- readRDS(url("https://depts.washington.edu:/trapnell-lab/software/monocle3/celegans/data/packer_embryo_expression.rds"))
+cell_metadata <- readRDS(url("https://depts.washington.edu:/trapnell-lab/software/monocle3/celegans/data/packer_embryo_colData.rds"))
+gene_annotation <- readRDS(url("https://depts.washington.edu:/trapnell-lab/software/monocle3/celegans/data/packer_embryo_rowData.rds"))
+
+cds <- new_cell_data_set(expression_matrix,
+                         cell_metadata = cell_metadata,
+                         gene_metadata = gene_annotation)
+```
+
+
+# Pre-process the data
+预处理的工作原理与聚类分析完全相同。这一次，我们将使用不同的策略进行 batch correction，其中包括 Packer & Zhu et al 在他们原始分析中所做的：
+
+注意：您的数据不会有此处显示的加载批次信息，您将使用自己的批次信息更正批次。
+
+```{r}
+library(monocle3)
+cds <- preprocess_cds(cds, num_dim = 50)
+cds <- align_cds(cds, alignment_group = "batch", residual_model_formula_str = "~ bg.300.loading + bg.400.loading + bg.500.1.loading + bg.500.2.loading + bg.r17.loading + bg.b01.loading + bg.b02.loading")
+```
+
+请注意，除了使用 `align_cds()` 的 `alignment_group` 参数对齐细胞组 (i.e. batches) 之外，我们还使用了 `residual_model_formula_str`。此参数用于减去连续效应。您可以使用它来控制诸如每个细胞中线粒体 reads 的分数之类的事情，它有时用作每个细胞的 QC 指标。在这个实验中（与许多 scRNA-seq 实验一样），一些细胞自发裂解，在加载到单细胞文库准备之前立即将它们的 mRNA 释放到细胞悬浮液中。这种“上清液 RNA”在一定程度上污染了每个细胞的转录组谱。幸运的是，估计每批细胞的背景污染水平并减去它是相当简单的，这就是 Packer 等人在最初研究中所做的。每一列 `bg.300.loading`、`bg.400.loading` 都对应于细胞可能被污染的背景信号。将这些列作为项传递到 `residual_model_formula_str` 中会告诉 `align_cds()` 在降维、聚类和轨迹推断之前减去这些信号。请注意，您可以使用 `alignment_group`、`residual_model_formula` 或两者调用 `align_cds()`。
+
+# Reduce dimensionality and visualize the results
+接下来，我们对数据进行降维。但是，与 UMAP 和 t-SNE 都适用的聚类不同，我们强烈建议您使用默认方法 UMAP：
+
+```{r}
+cds <- reduce_dimension(cds)
+plot_cells(cds, label_groups_by_cluster=FALSE,  color_cells_by = "cell.type")
+```
+
+如您所见，尽管我们只查看该数据集的一小部分，但 Monocle 重建了具有许多分支的轨迹。
+在 UMAP 上叠加手动注释表明这些分支主要由一种细胞类型占据。
+
+与聚类分析一样，您可以使用 `plot_cells()` 来可视化单个基因如何沿轨迹变化。
+让我们看一些在纤毛神经元中具有有趣表达模式的基因：
+
+```{r}
+ciliated_genes <- c("che-1",
+                    "hlh-17",
+                    "nhr-6",
+                    "dmd-6",
+                    "ceh-36",
+                    "ham-1")
+
+plot_cells(cds,
+           genes=ciliated_genes,
+           label_cell_groups=FALSE,
+           show_trajectory_graph=FALSE)
+```
+
+我们将在稍后的 [Finding genes that change as a function of pseudotime](https://cole-trapnell-lab.github.io/monocle3/docs/differential/#pseudo-dep) 部分中学习如何识别受限于轨迹的每个结果的基因。
+
+
+# Cluster your cells
+虽然细胞可以连续地从一种状态过渡到另一种状态，它们之间没有离散的边界，但 Monocle 并不假设数据集中的所有细胞都来自一个共同的转录“祖先”。在许多实验中，实际上可能存
+在多个不同的轨迹。例如，在对感染做出反应的组织中，组织驻留的免疫细胞和基质细胞将
+具有非常不同的初始转录组，并且对感染的反应也大不相同，因此它们应该属于同一轨迹的
+一部分。
+
+Monocle 能够通过其聚类过程了解何时应将细胞放置在相同的轨迹中，而不是单独的轨迹中。
+回想一下，我们运行 `cluster_cells()`，每个细胞不仅分配给一个 cluster，还分配给一个 partition。当你在学习轨迹时，每个 partition 最终都会变成一个单独的轨迹。 我们像以前一样运行 `cluster_cells()`。
+
+```{r}
+cds <- cluster_cells(cds)
+plot_cells(cds, color_cells_by = "partition")
+```
+
+# Learn the trajectory graph
+接下来，我们将使用 `learn_graph()` 函数在每个分区内拟合一个主图：
+
+```{r}
+cds <- learn_graph(cds)
+```
+
+```{r}
+plot_cells(cds,
+           color_cells_by = "cell.type",
+           label_groups_by_cluster=FALSE,
+           label_leaves=FALSE,
+           label_branch_points=FALSE)
+```
+
+该图将用于许多下游步骤，例如分支分析和差异表达。
+
+# Order the cells in pseudotime
+一旦我们学会了一个图表，我们就可以根据细胞在发育程序中的过程对它们进行排序。
+Monocle 在 pseudotime 中测量这一过程。下面定义了什么是 pseudotime。
+
+--------------------------------------------------------------------------------
+
+**What is pseudotime?**  
+Pseudotime 是衡量单个细胞通过细胞分化等过程取得多少进展的指标。
+
+在许多生物过程中，细胞不会以完美的同步方式发展。在细胞分化等过程的单细胞表达研究
+中，捕获的细胞可能在过程中广泛分布。也就是说，在同一时间捕获的一组细胞中，一些细
+胞可能还很远，而另一些细胞甚至可能还没有开始这个过程。当您想了解细胞从一种状态转
+换到另一种状态时发生的一系列调节变化时，这种异步会产生重大问题。跟踪同时捕获的跨
+细胞的表达会产生对基因动力学的非常压缩的感觉，并且该基因表达的明显可变性将非常高。
+
+通过根据学习轨迹上的进度对每个细胞进行排序，Monocle 缓解了由于异步而出现的问题。
+Monocle 不是将表达的变化作为时间的函数来跟踪，而是将变化作为沿着轨迹的进展的函数
+来跟踪，我们称之为“pseudotime”。pseudotime是进度的抽象单位：它只是一个细胞与轨迹
+起点之间的距离，沿最短路径测量。轨迹的总长度是根据细胞从起始状态移动到结束状态时
+所经历的转录变化总量来定义的。  
+
+-------------------------------------------------------------------------------- 
+
+为了将细胞按顺序排列，我们需要告诉 Monocle 生物过程的“起点”在哪里。
+我们通过选择我们标记为轨迹“root”的图区域来做到这一点。在时间序列实验中，这通常
+可以通过在 UMAP 空间中找到被早期时间点的细胞占据的点来完成：
+
+```{r}
+plot_cells(cds,
+           color_cells_by = "embryo.time.bin",
+           label_cell_groups=FALSE,
+           label_leaves=TRUE,
+           label_branch_points=TRUE,
+           graph_label_size=1.5)
+```
+
+黑线表示图的结构。请注意，该图不是完全连接的：不同 partition 中的细胞位于图的不同
+组件中。带有数字的圆圈表示图中的特殊点。每片叶子，用浅灰色圆圈表示，对应于轨迹的
+不同结果（即细胞命运）。黑色圆圈表示分支节点，细胞可以在其中移动到几个结果之一。
+您可以使用 `plot_cells` 的 `label_leaves` 和 `label_branch_points` 参数控制这些是否显示在图中。请注意，圆圈内的数字仅供参考。
+
+现在我们已经了解了早期细胞的位置，我们可以调用 `order_cells()`， 它将计算每个细胞在拟时序中的位置。为此，`order_cells()` 需要您指定轨迹图的根节点。如果您不提供它们作为参
+数，它将启动一个图形用户界面来选择一个或多个根节点。
+
+```{r}
+cds <- order_cells(cds)
+```
+
+在上面的示例中，我们只选择了一个位置，但您可以选择任意多个。绘制细胞并用拟时序着
+色显示它们是如何排序的：
+
+```{r}
+plot_cells(cds,
+           color_cells_by = "pseudotime",
+           label_cell_groups=FALSE,
+           label_leaves=FALSE,
+           label_branch_points=FALSE,
+           graph_label_size=1.5)
+```
+
+请注意，某些细胞是灰色的。这意味着它们有 infinite pseudotime， 因为它们无法从被选择的根节点到达。通常，分区上缺少根节点的任何细胞都将被分配一个 infinite pseudotime。通常，您应该为每个 partition 至少选择一个根节点。
+
+通常需要以编程方式指定轨迹的根节点，而不是手动选取它。
+下面的函数首先根据它们最接近的轨迹图节点对细胞进行分组。然后，它计算每个节点的细胞有多少来自最早的时间点。然后它选择被早期细胞占用最多的节点并将其作为根节点返回。
+
+```{r}
+# a helper function to identify the root principal points:
+get_earliest_principal_node <- function(cds, time_bin="130-170"){
+  cell_ids <- which(colData(cds)[, "embryo.time.bin"] == time_bin)
+  
+  closest_vertex <-
+  cds@principal_graph_aux[["UMAP"]]$pr_graph_cell_proj_closest_vertex
+  closest_vertex <- as.matrix(closest_vertex[colnames(cds), ])
+  root_pr_nodes <-
+  igraph::V(principal_graph(cds)[["UMAP"]])$name[as.numeric(names
+  (which.max(table(closest_vertex[cell_ids,]))))]
+  
+  root_pr_nodes
+}
+cds <- order_cells(cds, root_pr_nodes=get_earliest_principal_node(cds))
+```
+
+通过 `root_pr_node` 参数将程序选择的根节点传递给 `order_cells()` ：
+
+```{r}
+plot_cells(cds,
+           color_cells_by = "pseudotime",
+           label_cell_groups=FALSE,
+           label_leaves=FALSE,
+           label_branch_points=FALSE,
+           graph_label_size=1.5)
+```
+
+请注意，我们可以通过首先使用 `partitions()` 函数按 partition 对细胞进行分组，在每个 partition 的基础上轻松地执行此操作。这将导致所有细胞都被分配一个有限的 pseudotime。
+
+
+# Subset cells by branch
+根据轨迹中的分支对细胞进行 subset 通常很有用。函数 `choose_graph_segments`  允许您以交互方式执行此操作。
+
+```{r}
+cds_sub <- choose_graph_segments(cds)
+```
+
+
+# Working with 3D trajectories
+```{r}
+cds_3d <- reduce_dimension(cds, max_components = 3)
+cds_3d <- cluster_cells(cds_3d)
+cds_3d <- learn_graph(cds_3d)
+cds_3d <- order_cells(cds_3d, root_pr_nodes=get_earliest_principal_node(cds))
+
+cds_3d_plot_obj <- plot_cells_3d(cds_3d, color_cells_by="partition")
+```
+

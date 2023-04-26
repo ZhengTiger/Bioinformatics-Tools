@@ -1,0 +1,152 @@
+---
+title: "Inference, visualization and analysis of neural-specific communication network"
+author: TigerZ
+date: 2023-4-25
+output: 
+  html_notebook: 
+    toc: yes
+    number_sections: yes
+---
+
+# Load NeuronChat library
+
+```{r}
+library(NeuronChat)
+library(CellChat)
+```
+
+
+
+# Part I: Create NeuronChat object
+
+```{r}
+# 导入示例数据：Yao 2021 皮层数据, 已处理
+data(list='cortex_data')
+# 通过选择 VISp 区域来对数据进行取子集。
+region_name <- 'VISp'
+cell_class <- names(table(meta$class_label))
+cell_idx <- which(meta$region_label %in% region_name & meta$class_label %in% cell_class & !(meta$subclass_label %in%c('Car3','CR','DG','L2/3 IT PPP','L5/6 IT TPE-ENT')))
+target_df_single  <- target_df[cell_idx,] # 一个数据框：行是细胞，列是基因（最后一列是 cell subclass）。
+meta_tmp <- meta[cell_idx,]
+rownames(meta_tmp) <- meta_tmp$sample_name # subset meta
+df_group <- meta_tmp[!duplicated(meta_tmp$subclass_label),c('class_label','subclass_label')]
+group <- structure(df_group$class_label,names=df_group$subclass_label) # 为 subclasses 创建细胞类，用于绘图。
+
+# 创建 NeuronChat 对象；选择“mouse”数据库用于小鼠数据；选择“human”用于人类数据。
+# 请注意，第一个参数应该是一个数字矩阵，行是基因，列是细胞。
+# createNeuronChat()从一个数据矩阵创建一个NeuronChat对象
+x <- createNeuronChat(t(as.matrix(target_df_single[,1:(dim(target_df_single)[2]-1)])),DB='mouse',group.by = target_df_single$cell_subclass)
+```
+
+
+
+# Part II: Run NeuronChat to infer the neural-specific cell-cell communication networks
+
+```{r}
+# M用于permutation test；通常当M=100时大约需要4分钟，具体取决于数据集大小和细胞组数量。
+# 可以设置 M=10 来更快地运行
+x <- run_NeuronChat(x, M=10)
+# 单个交互对的通信网络存储在“net”插槽中
+# 将所有交互对的通信网络聚合，方法可以是“weight”、“count”等。
+net_aggregated_x <- net_aggregation(x@net,method = 'weight')
+```
+
+
+
+# Part III: Visualization of neural-specific cell-cell communication networks
+
+## for aggregated network
+
+```{r fig.height=2, fig.width=4, message=FALSE, warning=FALSE}
+par(mfrow=c(1,2))
+# Visualization, circle plot, for the aggregated network
+netVisual_circle_neuron(net_aggregated_x,group=group,vertex.label.cex = 1)
+# Visualization, chordDiagram, for the aggregated network; also using cellchat function netVisual_chord_cell_internal(net_aggregated_x, group = group,lab.cex=1)
+netVisual_chord_neuron(x,method = 'weight',group=group,lab.cex = 1)
+```
+
+```{r}
+# Visualization, heatmap for the aggregated network
+heatmap_aggregated(x, method='weight',group=group)
+```
+
+## for individual network
+
+```{r fig.height=2, fig.width=4}
+par(mfrow=c(1,2))
+# Visualization for the single interaction pair, circle plot  
+netVisual_circle_neuron(x@net$Glu_Gria2,group=group,vertex.label.cex = 1)
+# Visualization for the single interaction pair, chord diagram 
+netVisual_chord_neuron(x,interaction_use='Glu_Gria2',group=group,lab.cex = 1)
+```
+
+```{r fig.height=2, fig.width=3}
+# Visualization for the single interaction pair, heatmap 
+heatmap_single(x,interaction_name='Glu_Gria2',group=group)
+```
+
+```{r fig.height=2, fig.width=8}
+# 用于单个交互对的可视化，热图与小提琴图显示与配体和靶标相关的基因表达。
+lig_tar_heatmap(x,interaction_name='Glu_Gria2',width.vector=c(0.38,0.35,0.27))
+```
+
+# Part IV: Analysis of communication
+
+## barplot 显示所有交互对的链接或信息流。
+
+```{r fig.height=4, fig.width=2}
+g1 <- rankNet_Neuron(x,slot.name = "net",measure = c("weight"),mode='single',font.size = 5) 
+g2 <- rankNet_Neuron(x,slot.name = "net",measure = c("count"),mode='single',font.size = 5)
+g1+g2
+```
+
+## outgoing/incoming pattern
+
+```{r fig.height=2, fig.width=2, message=FALSE, warning=FALSE}
+# selectK_Neuron(x,pattern = "outgoing")
+# selectK_Neuron(x,pattern = "incoming")
+x<- identifyCommunicationPatterns_Neuron(x, slot.name = "net", pattern = c("outgoing"), k=4,height = 18)
+x<- identifyCommunicationPatterns_Neuron(x, slot.name = "net", pattern = c("incoming"), k=4,height = 18)
+```
+
+```{r warning=FALSE}
+library(ggalluvial)
+netAnalysis_river_Neuron(x,slot.name = "net", pattern = c("outgoing"),font.size = 2.5,cutoff.1 = 0.5,cutoff.2=0.5)
+#> Please make sure you have load `library(ggalluvial)` when running this function
+```
+
+```{r}
+netAnalysis_river_Neuron(x,slot.name = "net", pattern = c("incoming"),font.size = 2.5,cutoff.1 = 0.5,cutoff.2=0.5)
+#> Please make sure you have load `library(ggalluvial)` when running this function
+```
+
+
+
+# manifold learning and classification
+
+```{r warning=FALSE}
+x <- computeNetSimilarity_Neuron(x,type='functional')
+x  <- CellChat::netEmbedding(x, slot.name = "net_analysis", type = "functional")
+#> Manifold learning of the signaling networks for a single dataset
+x <- CellChat::netClustering(x, type='functional',slot.name = "net_analysis",k=5)
+#> Classification learning of the signaling networks for a single dataset
+netVisual_embedding_Neuron(x, type = "functional", label.size = 5,pathway.remove.show = F)
+```
+
+```{r}
+netVisual_embeddingZoomIn_Neuron(x, type = "functional", nCol = 2,label.size = 3)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+

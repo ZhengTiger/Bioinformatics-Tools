@@ -1,0 +1,161 @@
+---
+title: "Mapping and annotating query datasets"
+author: TigerZ
+date: 2023-2-1
+output: 
+  html_notebook: 
+    toc: yes
+    number_sections: yes
+    css: "C:/Users/13081/OneDrive - webmail.hzau.edu.cn/Github/learn/R/notebook.css"
+---
+
+# Introduction to single-cell reference mapping
+
+在本节，我们首先构建一个 integrated reference，然后演示如何利用这个 reference 来注释新的 query datasets。生成 integrated reference 的详细步骤见 [Introduction to scRNA-seq integration](https://satijalab.org/seurat/articles/integration_introduction.html)。生成后，此 reference 可用于通过细胞类型标签传输和将 query cells 投影到 reference UMAP 等任务来分析其他 query datasets。值得注意的是，这不需要矫正原始的 query data，因此如果有高质量的 reference，这可能是一种有效的策略。
+
+
+# Dataset preprocessing
+
+出于本示例的目的，我们选择了通过四种技术产生的人类胰岛细胞数据集，即 CelSeq (GSE81076)、CelSeq2 (GSE85241)、Fluidigm C1 (GSE86469), and SMART-Seq2 (E-MTAB-5061)。为方便起见，我们通过 SeuratData 包分发此数据集。metadata 包含四个数据集中每个细胞的技术（`tech` column）和细胞类型注释（`celltype` column）。
+
+```{r}
+library(Seurat)
+library(SeuratData)
+```
+
+```{r}
+InstallData("panc8")
+```
+
+为了构建 reference，我们将识别各个数据集之间的“anchors”。首先，我们将组合对象拆分为一个 list，每个数据集作为一个元素（这只是必要的，因为数据被捆绑在一起以便于分发）。
+
+```{r}
+data("panc8")
+pancreas.list <- SplitObject(panc8, split.by = "tech")
+pancreas.list <- pancreas.list[c("celseq", "celseq2", "fluidigmc1", "smartseq2")]
+```
+
+```{r}
+pancreas.list
+```
+
+
+在找到anchors之前，我们执行标准预处理（log-normalization），并为每个anchors单独识别可变特征。请注意，Seurat 实现了一种改进的基于方差稳定变换（“vst”）的变量特征选择方法
+
+```{r}
+for (i in 1:length(pancreas.list)) {
+    pancreas.list[[i]] <- NormalizeData(pancreas.list[[i]], verbose = FALSE)
+    pancreas.list[[i]] <- FindVariableFeatures(pancreas.list[[i]], selection.method = "vst", nfeatures = 2000, verbose = FALSE)
+}
+```
+
+
+# Integration of 3 pancreatic islet cell datasets
+
+接下来，我们使用 `FindIntegrationAnchors()` 函数识别anchors，该函数将 Seurat 对象列表作为输入。在这里，我们将其中三个对象集成到一个参考中（稍后我们将在本小插图中使用第四个对象作为查询数据集来演示映射）。
+
+- 我们在这里使用所有默认参数来识别anchors，包括数据集的“维度”（30；随意尝试在很宽的范围内更改此参数，例如在 10 到 50 之间）。
+
+```{r}
+reference.list <- pancreas.list[c("celseq", "celseq2", "smartseq2")]
+pancreas.anchors <- FindIntegrationAnchors(object.list = reference.list, dims = 1:30)
+```
+
+然后我们将这些anchors传递给 `IntegrateData()` 函数，该函数返回一个 Seurat 对象。
+
+- 返回的对象将包含一个新的`Assay`，其中包含所有细胞的integrated（or ‘batch-corrected’）表达矩阵，使它们能够被联合分析。
+
+```{r}
+pancreas.integrated <- IntegrateData(anchorset = pancreas.anchors, dims = 1:30)
+```
+
+运行 `IntegrateData()` 后，Seurat 对象将包含一个带有integrated表达矩阵的新 Assay。
+请注意，原始（未校正的值）仍存储在“RNA”测定中的对象中，因此您可以来回切换。
+
+然后我们可以使用这个新的integrated矩阵进行下游分析和可视化。在这里，我们scale integrated 数据，运行 PCA，并使用 UMAP 可视化结果。integrated的数据集按细胞类型而不是技术进行聚类。
+
+```{r}
+library(ggplot2)
+library(cowplot)
+library(patchwork)
+# switch to integrated assay. The variable features of this assay are automatically set during
+# IntegrateData
+DefaultAssay(pancreas.integrated) <- "integrated"
+# Run the standard workflow for visualization and clustering
+pancreas.integrated <- ScaleData(pancreas.integrated, verbose = FALSE)
+pancreas.integrated <- RunPCA(pancreas.integrated, npcs = 30, verbose = FALSE)
+pancreas.integrated <- RunUMAP(pancreas.integrated, reduction = "pca", dims = 1:30, verbose = FALSE)
+```
+
+```{r fig.height=1.5, fig.width=3.5}
+p1 <- DimPlot(pancreas.integrated, reduction = "umap", group.by = "tech")
+p2 <- DimPlot(pancreas.integrated, reduction = "umap", group.by = "celltype", label = TRUE, repel = TRUE) +
+    NoLegend()
+p1 + p2
+```
+
+# Cell type classification using an integrated reference
+
+Seurat 还支持将 reference data（or meta data）投射到 query object。虽然许多方法是保守的（两个过程都从识别anchors开始），但数据transfer和integration之间有两个重要区别：
+
+1. In data transfer, Seurat 不会更正或修改 query expression data。  
+2. In data transfer, Seurat 有一个选项（set by default）将 reference 的 PCA 结构投射到 query 上，而不是使用 CCA 学习联合结构。我们通常建议在 scRNA-seq 数据集之间投射数据时使用此选项。
+
+找到 anchors 后，我们使用 `TransferData()`  函数根据 reference data（参考细胞类型标签的向量）对 query cells 进行分类。`TransferData()` 返回一个包含预测 ID 和预测分数的矩阵，我们可以将其添加到 query metadata 中。
+
+```{r}
+pancreas.query <- pancreas.list[["fluidigmc1"]]
+pancreas.anchors <- FindTransferAnchors(reference = pancreas.integrated, query = pancreas.query, dims = 1:30, reference.reduction = "pca")
+predictions <- TransferData(anchorset = pancreas.anchors, refdata = pancreas.integrated$celltype, dims = 1:30)
+pancreas.query <- AddMetaData(pancreas.query, metadata = predictions)
+```
+
+因为我们有来自完整integrated分析的原始标签注释，所以我们可以评估我们预测的细胞类型注释与完整参考的匹配程度。在这个例子中，我们发现细胞类型分类的一致性很高，超过 96% 的细胞被正确标记。
+
+```{r}
+pancreas.query$prediction.match <- pancreas.query$predicted.id == pancreas.query$celltype
+table(pancreas.query$prediction.match)
+```
+
+为了进一步验证这一点，我们可以检查特定胰岛细胞群的一些典型细胞类型标记。请注意，即使其中一些细胞类型仅由一两个细胞（例如 epsilon 细胞）表示，我们仍然能够正确分类它们。
+
+```{r}
+table(pancreas.query$predicted.id)
+```
+
+```{r fig.height=3, fig.width=4, message=FALSE, warning=FALSE}
+VlnPlot(pancreas.query, c("REG1A", "PPY", "SST", "GHRL", "VWF", "SOX10"), group.by = "predicted.id")
+```
+
+
+# Unimodal UMAP Projection
+
+在 Seurat v4 中，我们还启用了将 query 投影到 reference UMAP 结构上。这可以通过计算 reference UMAP 模型然后调用 `MapQuery()` 而不是 `TransferData()` 来实现。
+
+```{r}
+pancreas.integrated <- RunUMAP(pancreas.integrated, dims = 1:30, reduction = "pca", return.model = TRUE)
+pancreas.query <- MapQuery(anchorset = pancreas.anchors, reference = pancreas.integrated, query = pancreas.query,
+    refdata = list(celltype = "celltype"), reference.reduction = "pca", reduction.model = "umap")
+```
+
+我们现在可以在 reference 旁边可视化 query cells。
+
+```{r fig.height=1.5, fig.width=3.5, message=FALSE, warning=FALSE, paged.print=FALSE}
+p1 <- DimPlot(pancreas.integrated, reduction = "umap", group.by = "celltype", label = TRUE, label.size = 3,repel = TRUE) + NoLegend() + ggtitle("Reference annotations")
+p2 <- DimPlot(pancreas.query, reduction = "ref.umap", group.by = "predicted.celltype", label = TRUE, label.size = 3, repel = TRUE) + NoLegend() + ggtitle("Query transferred labels")
+p1 + p2
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+

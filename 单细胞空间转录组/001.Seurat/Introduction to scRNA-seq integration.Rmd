@@ -1,0 +1,232 @@
+---
+title: "Introduction to scRNA-seq integration"
+author: TigerZ
+date: 2023-1-31
+output: 
+  html_notebook: 
+    toc: yes
+    number_sections: yes
+    css: F:/Github/learn/R/notebook.css
+---
+
+
+# Introduction to scRNA-seq integration
+
+两个或多个单细胞数据集的联合分析提出了独特的挑战。特别是，在标准工作流程下，识别跨多个数据集存在的细胞群可能会出现问题。`Seurat v4` 包括一组方法来匹配（或“align”）跨数据集的共享细胞群。这些方法首先识别处于匹配生物状态（“anchors”）的跨数据集细胞对，既可用于校正数据集之间的技术差异（即批次效应校正），也可用于对细胞进行跨实验条件比较 scRNA-seq 分析。
+
+下面，我们展示了 scRNA-seq integration 方法，如 [Stuart*, Butler* et al, 2019 ](https://www.cell.com/cell/fulltext/S0092-8674(19)30559-8)所述，以对处于静息(resting)或干扰素刺激(interferon-stimulated)状态的人类免疫细胞 (PBMC) 进行比较分析。
+
+## Integration goals
+
+以下教程旨在为您概述使用 Seurat integration 程序可能对复杂细胞类型进行的各种比较分析。在这里，我们解决了几个关键目标：
+
+- 为下游分析创建了一个“integrated” data assay
+- 识别存在于两个数据集中的细胞类型
+- 获得在对照细胞和受刺激细胞中都保守的细胞类型 markers
+- 比较数据集以找到细胞类型对刺激的特定反应
+
+## Setup the Seurat objects
+
+为方便起见，我们通过 `SeuratData` 包分发此数据集。
+
+```{r}
+library(Seurat)
+library(SeuratData)
+library(patchwork)
+```
+
+```{r}
+# install dataset
+InstallData("ifnb")
+```
+
+```{r}
+# load dataset
+LoadData("ifnb")
+
+# split the dataset into a list of two seurat objects (stim and CTRL)
+ifnb.list <- SplitObject(ifnb, split.by = "stim")
+```
+
+```{r}
+ifnb.list
+```
+
+```{r}
+# normalize and identify variable features for each dataset independently
+ifnb.list <- lapply(X = ifnb.list, FUN = function(x) {
+    x <- NormalizeData(x)
+    x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+})
+
+# select features that are repeatedly variable across datasets for integration
+features <- SelectIntegrationFeatures(object.list = ifnb.list)
+```
+
+## Perform integration
+
+然后，我们使用 `FindIntegrationAnchors()` 函数识别 anchors，该函数将 Seurat objects list 作为输入，并通过 `IntegrateData()` 使用这些 anchors 将两个数据集集成在一起。
+
+```{r}
+immune.anchors <- FindIntegrationAnchors(object.list = ifnb.list, anchor.features = features)
+```
+
+```{r}
+# this command creates an 'integrated' data assay
+immune.combined <- IntegrateData(anchorset = immune.anchors)
+```
+
+## Perform an integrated analysis
+
+现在我们可以对所有细胞进行单一的综合分析！
+
+```{r}
+# 注意我们将对矫正后的数据执行下游分析，原始未修改的数据仍然存在于“RNA” assay 中
+DefaultAssay(immune.combined) <- "integrated"
+
+# Run the standard workflow for visualization and clustering
+immune.combined <- ScaleData(immune.combined, verbose = FALSE)
+immune.combined <- RunPCA(immune.combined, npcs = 30, verbose = FALSE)
+immune.combined <- RunUMAP(immune.combined, reduction = "pca", dims = 1:30)
+immune.combined <- FindNeighbors(immune.combined, reduction = "pca", dims = 1:30)
+immune.combined <- FindClusters(immune.combined, resolution = 0.5)
+```
+
+```{r fig.height=1.5, fig.width=3.5}
+# Visualization
+p1 <- DimPlot(immune.combined, reduction = "umap", group.by = "stim")
+p2 <- DimPlot(immune.combined, reduction = "umap", label = TRUE, repel = TRUE)
+p1 + p2
+```
+
+为了并排可视化这两个条件，我们可以使用 `split.by` 参数来显示按 cluster 着色的每个条件。
+
+```{r fig.height=1.5, fig.width=3.5}
+DimPlot(immune.combined, reduction = "umap", split.by = "stim")
+```
+
+## Identify conserved cell type markers
+
+为了识别跨条件保守的典型细胞类型标记基因，我们提供了 `FindConservedMarkers()` 函数。此函数对每个数据集/组执行差异基因表达测试，并使用 MetaDE R 包中的元分析方法组合 p-values。例如，无论 cluster 6（NK cells）中的刺激条件如何，我们都可以计算出作为保守标记的基因。
+
+```{r}
+# 为了在 integration 后进行差异表达分析，我们切换回原来的数据
+DefaultAssay(immune.combined) <- "RNA"
+nk.markers <- FindConservedMarkers(immune.combined, ident.1 = 6, grouping.var = "stim", verbose = FALSE)
+head(nk.markers)
+```
+
+我们可以探索每个 cluster 的这些标记基因，并使用它们将我们的 cluster 注释为特定的细胞类型。
+
+```{r fig.height=2.3, fig.width=3}
+FeaturePlot(immune.combined, features = c("CD3D", "SELL", "CREM", "CD8A", "GNLY", "CD79A", "FCGR3A","CCL2", "PPBP"), min.cutoff = "q9")
+```
+
+```{r message=FALSE, warning=FALSE}
+immune.combined <- RenameIdents(immune.combined, `0` = "CD14 Mono", `1` = "CD4 Naive T", `2` = "CD4 Memory T", `3` = "CD16 Mono", `4` = "B", `5` = "CD8 T", `6` = "NK", `7` = "T activated", `8` = "DC", `9` = "B Activated", `10` = "Mk", `11` = "pDC", `12` = "Eryth", `13` = "Mono/Mk Doublets", `14` = "HSPC")
+DimPlot(immune.combined, label = TRUE)
+```
+
+`DotPlot()` 函数的 `split.by` 参数可用于查看跨条件的保守细胞类型标记，显示表达水平和 cluster 中表达任何给定基因的细胞百分比。在这里，我们为 14 个 clusters 中的每一个 clusters 绘制了 2-3 个强标记基因。
+
+```{r fig.height=3.5, fig.width=3.5}
+Idents(immune.combined) <- factor(Idents(immune.combined), levels = c("HSPC", "Mono/Mk Doublets", "pDC", "Eryth", "Mk", "DC", "CD14 Mono", "CD16 Mono", "B Activated", "B", "CD8 T", "NK", "T activated", "CD4 Naive T", "CD4 Memory T"))
+markers.to.plot <- c("CD3D", "CREM", "HSPH1", "SELL", "GIMAP5", "CACYBP", "GNLY", "NKG7", "CCL5", "CD8A", "MS4A1", "CD79A", "MIR155HG", "NME1", "FCGR3A", "VMO1", "CCL2", "S100A9", "HLA-DQA1", "GPR183", "PPBP", "GNG11", "HBA2", "HBB", "TSPAN13", "IL3RA", "IGJ", "PRSS57")
+DotPlot(immune.combined, features = markers.to.plot, cols = c("blue", "red"), dot.scale = 8, split.by = "stim") +
+    RotatedAxis()
+```
+
+## Identify differential expressed genes across conditions
+
+现在我们已经对齐了受刺激细胞和对照细胞，我们可以开始进行比较分析并查看刺激引起的差异。广泛观察这些变化的一种方法是绘制受刺激细胞和对照细胞的平均表达，并在散点图上寻找视觉异常值的基因。在这里，我们采用受刺激和对照的 naive T cells 和 CD14 monocyte 群的平均表达，并生成散点图，突出显示对干扰素刺激表现出显着反应的基因。
+
+```{r fig.height=1.5, fig.width=3.5, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(cowplot)
+theme_set(theme_cowplot())
+t.cells <- subset(immune.combined, idents = "CD4 Naive T")
+Idents(t.cells) <- "stim"
+avg.t.cells <- as.data.frame(log1p(AverageExpression(t.cells, verbose = FALSE)$RNA))
+avg.t.cells$gene <- rownames(avg.t.cells)
+
+cd14.mono <- subset(immune.combined, idents = "CD14 Mono")
+Idents(cd14.mono) <- "stim"
+avg.cd14.mono <- as.data.frame(log1p(AverageExpression(cd14.mono, verbose = FALSE)$RNA))
+avg.cd14.mono$gene <- rownames(avg.cd14.mono)
+
+genes.to.label = c("ISG15", "LY6E", "IFI6", "ISG20", "MX1", "IFIT2", "IFIT1", "CXCL10", "CCL8")
+p1 <- ggplot(avg.t.cells, aes(CTRL, STIM)) + geom_point() + ggtitle("CD4 Naive T Cells")
+p1 <- LabelPoints(plot = p1, points = genes.to.label, repel = TRUE)
+p2 <- ggplot(avg.cd14.mono, aes(CTRL, STIM)) + geom_point() + ggtitle("CD14 Monocytes")
+p2 <- LabelPoints(plot = p2, points = genes.to.label, repel = TRUE)
+p1 + p2
+```
+
+如您所见，许多相同的基因在这两种细胞类型中都被上调，并且可能代表了一种保守的干扰素反应途径。
+
+因为我们有信心在不同条件下识别出常见的细胞类型，所以我们可以询问相同类型细胞在不同条件下哪些基因会发生变化。首先，我们在 meta.data slot 中创建一个列来保存细胞类型和刺激信息，并将当前标识切换到该列。然后我们使用 `FindMarkers()` 来查找受刺激和对照 B cells 之间不同的基因。请注意，此处显示的许多顶级基因与我们之前作为核心干扰素反应基因绘制的基因相同。此外，我们看到的 CXCL10 等基因对 monocyte 和 B cell 干扰素反应具有特异性，在此列表中也显示出非常重要的意义。
+
+```{r}
+immune.combined$celltype.stim <- paste(Idents(immune.combined), immune.combined$stim, sep = "_")
+immune.combined$celltype <- Idents(immune.combined)
+Idents(immune.combined) <- "celltype.stim"
+b.interferon.response <- FindMarkers(immune.combined, ident.1 = "B_STIM", ident.2 = "B_CTRL", verbose = FALSE)
+head(b.interferon.response, n = 15)
+```
+
+另一种可视化基因表达变化的有用方法是使用 `FeaturePlot()` 或 `VlnPlot()` 函数的 `split.by` 选项。这将显示给定基因列表的 FeaturePlots，按分组变量拆分（此处为刺激条件）。CD3D 和 GNLY 等基因是典型的细胞类型标记（for T cells and NK/CD8 T cells），它们几乎不受干扰素刺激的影响，并且在对照组和刺激组中显示出相似的基因表达模式。另一方面，IFI6 和 ISG15 是核心干扰素反应基因，在所有细胞类型中相应上调。最后，CD14 和 CXCL10 是显示细胞类型特异性干扰素反应的基因。CD14 monocytes 刺激后 CD14 表达降低，这可能导致监督分析框架中的错误分类，强调了综合分析的价值。CXCL10 在干扰素刺激后在 monocytes 和 B cells 中显示出明显的上调，但在其他细胞类型中没有。
+
+```{r fig.height=4, fig.width=3}
+FeaturePlot(immune.combined, features = c("CD3D", "GNLY", "IFI6"), split.by = "stim", max.cutoff = 3, cols = c("grey", "red"))
+```
+
+```{r fig.height=4, fig.width=3, message=FALSE, warning=FALSE}
+plots <- VlnPlot(immune.combined, features = c("LYZ", "ISG15", "CXCL10"), split.by = "stim", group.by = "celltype", pt.size = 0, combine = FALSE)
+wrap_plots(plots = plots, ncol = 1)
+```
+
+
+
+# Performing integration on datasets normalized with SCTransform
+
+在 [Hafemeister and Satija, 2019](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-019-1874-1)，我们引入了一种基于正则化负二项式回归的 scRNA-seq normalization 的改进方法。该方法名为 “sctransform”，避免了标准规范化工作流程的一些缺陷，包括添加伪计数和对数转换。您可以阅读有关 sctransform 的更多信息在 [manuscript](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-019-1874-1) 和 [SCTransform vignette](https://satijalab.org/seurat/articles/sctransform_vignette.html)。
+
+下面，我们演示了如何为已使用 sctransform 工作流 normalized 的数据集修改 Seurat integration workflow。这些命令在很大程度上相似，但有一些关键差异：
+
+- 在 integration 之前通过 `SCTransform()` 而不是 `NormalizeData()` 单独规范化数据集
+- 正如我们在 [SCTransform vignette](https://satijalab.org/seurat/articles/sctransform_vignette.html) 中进一步讨论的那样，我们通常使用 3,000 个或更多特征来分析 sctransform 的下游。
+- 在识别 anchors 之前运行 `PrepSCTIntegration()` 函数
+- 运行 `FindIntegrationAnchors()` 和 `IntegrateData()` 时，将 `normalization.method` 参数值设置为 `SCT`。
+- 运行 sctransform-based workflows，包括 integration 时，不要运行 `ScaleData()` 函数
+
+```{r}
+LoadData("ifnb")
+ifnb.list <- SplitObject(ifnb, split.by = "stim")
+ifnb.list <- lapply(X = ifnb.list, FUN = SCTransform)
+features <- SelectIntegrationFeatures(object.list = ifnb.list, nfeatures = 3000)
+ifnb.list <- PrepSCTIntegration(object.list = ifnb.list, anchor.features = features)
+```
+
+```{r}
+immune.anchors <- FindIntegrationAnchors(object.list = ifnb.list, normalization.method = "SCT", anchor.features = features)
+immune.combined.sct <- IntegrateData(anchorset = immune.anchors, normalization.method = "SCT")
+```
+
+```{r}
+immune.combined.sct <- RunPCA(immune.combined.sct, verbose = FALSE)
+immune.combined.sct <- RunUMAP(immune.combined.sct, reduction = "pca", dims = 1:30)
+```
+
+```{r fig.height=1.5, fig.width=3.5}
+p1 <- DimPlot(immune.combined.sct, reduction = "umap", group.by = "stim")
+p2 <- DimPlot(immune.combined.sct, reduction = "umap", group.by = "seurat_annotations", label = TRUE, repel = TRUE)
+p1 + p2
+```
+
+现在数据集已经整合，您可以按照 vignette 中的先前步骤识别细胞类型和特定于细胞类型的反应。
+
+
+
+
+
+

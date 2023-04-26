@@ -1,0 +1,1 @@
+https://rawcdn.githack.com/zhenghu159/learn/main/R/scrattch/scrattch_tutorial.nb.html

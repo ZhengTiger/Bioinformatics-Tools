@@ -1,0 +1,143 @@
+---
+title: "An Introduction to `glmnet`"
+author: ZhengHu
+date: 2023-3-24
+output: 
+  html_notebook: 
+    toc: yes
+    number_sections: yes
+---
+
+
+# Introduction
+
+Glmnet 是一个通过惩罚最大似然估计来拟合广义线性和类似模型的包。正则化路径是在正则化参数 lambda 的值的网格上（对数尺度上）计算 lasso 或弹性网络惩罚。该算法非常快速，并且可以利用输入矩阵 `x` 中的稀疏性。它适合于线性、逻辑和多项式、泊松和 Cox 回归模型。它还可以拟合多响应线性回归、自定义家族的广义线性模型和松弛 lasso 回归模型。该包包括用于预测和绘图的方法，以及交叉验证的函数。
+
+Glmnet 的作者是 Jerome Friedman、Trevor Hastie、Rob Tibshirani、Balasubramanian Narasimhan、Kenneth Tay、Noah Simon，Junyang Qian 为该包做出了贡献，R 包由 Trevor Hastie维护。Junyang Qian 维护了 Glmnet 的 MATLAB 版本，B. Balakumar 维护了 Python 版本（尽管两个版本都落后了几个版本）。
+
+这个小节描述了 glmnet 在 R 中的基本用法。还有一些有用的小节：
+
+* [“Regularized Cox Regression”](https://glmnet.stanford.edu/articles/Coxnet.html) 描述了如何使用 glmnet 为生存数据拟合正则化 Cox 模型。
+* [“GLM family functions in glmnet”](https://glmnet.stanford.edu/articles/glmnetFamily.html) 描述了如何通过 family 参数将自定义广义线性模型 (GLM) 与弹性网络惩罚相匹配。
+* [“The Relaxed Lasso”](https://glmnet.stanford.edu/articles/relax.html) 描述了如何使用 `relax` 参数拟合 relaxed lasso regression models。
+
+
+
+
+
+# Installation
+
+与许多其他 R 包一样，获得 `glmnet` 最简单的方法是直接从 CRAN 安装它。在 R console 中键入以下命令：
+
+```{r}
+install.packages("glmnet", repos = "https://cran.us.r-project.org")
+```
+
+
+
+
+
+
+# Quick Start
+
+本节的目的是让用户对软件包有一个大致的了解。我们将简要介绍主要功能、基本操作和输出。在本节之后，用户可能会更好地了解哪些功能可用，使用哪些功能，或者至少在哪里寻求帮助。
+
+首先，我们加载 `glmnet` 包：
+
+```{r}
+library(glmnet)
+```
+
+包中使用的默认模型是 Guassian linear model 或 “least squares”，我们将在本节中演示。我们加载一组预先创建的数据进行说明：
+
+```{r}
+data(QuickStartExample)
+x <- QuickStartExample$x
+y <- QuickStartExample$y
+```
+
+该命令从这个保存的 R 数据档案中加载输入矩阵 `x` 和响应向量 `y`。
+
+我们使用对 `glmnet` 最基本的调用来拟合模型。
+
+```{r}
+fit <- glmnet(x, y)
+```
+
+`fit` 是 `glmnet` class 的一个对象，它包含拟合模型的所有相关信息以供进一步使用。我们不鼓励用户直接提取组件。相反，为对象提供了各种方法，如 `plot`、`print`、`coef`、`predict`，使我们能够更优雅地执行这些任务。
+
+我们可以通过执行 `plot` 方法来可视化系数：
+
+```{r}
+plot(fit)
+```
+
+每条曲线对应一个变量。It shows the path of its coefficient against the ℓ1-norm of the whole coefficient vector as λ varies。上面的轴表示当前 λ 下非零系数的数量，这是 lasso 的有效自由度（df）。用户也可能希望对曲线进行注释：这可以通过在绘图命令中设置 `label=TRUE` 来完成。
+
+如果我们只输入对象名称或使用打印功能，则会显示每个步骤的 `glmnet` 路径总结：
+
+```{r}
+print(fit)
+```
+
+它从左到右显示了非零系数的数量（`Df`），解释的（零）偏差百分比（`%Dev`）和 λ（`Lambda`） 的值。尽管 `glmnet` 在默认情况下拟合 100 个 `lambda` 值的模型，但如果 `%dev` 在一个 `lambda` 到下一个 `lambda` 之间没有足够的变化（通常在路径的末尾附近），它会提前停止。
+
+我们可以在一个或多个 λ 在序列的范围内获得模型系数：
+
+```{r}
+coef(fit, s = 0.1)
+```
+
+（为什么是 `s` 而不是 `lambda`？如果我们希望在未来允许以其他方式指定模型大小。）用户还可以在特定 λ 下进行预测具有新的输入数据：
+
+```{r}
+set.seed(29)
+nx <- matrix(rnorm(5 * 20), 5, 20)
+predict(fit, newx = nx, s = c(0.1, 0.05))
+```
+
+函数 `glmnet` 返回一系列模型供用户选择。在许多情况下，用户可能更喜欢软件来选择其中一个。交叉验证可能是该任务中最简单、使用最广泛的方法。`cv.glmnet` 是这里进行交叉验证的主要功能，还有各种支持方法，如绘图和预测。
+
+```{r}
+cvfit <- cv.glmnet(x, y)
+```
+
+`cv.gmnet`返回一个`cv.glmnet`对象，包含交叉验证拟合的所有成分的列表。与`glmnet`一样，我们不鼓励用户直接提取组件，除非查看λ。该包为潜在任务提供了精心设计的功能。例如，我们可以绘制对象：
+
+```{r}
+plot(cvfit)
+```
+
+这个图绘制了交叉验证曲线（红色虚线）以及沿着λ序列的上下标准偏差曲线（误差条）。沿着λ的两个特殊值序列由垂直虚线表示。`lambda.min`是给出最小平均交叉验证误差的λ值，而`lambda.1se`是给出了最正则化的模型的λ值，使得交叉验证的误差在最小值的一个标准误差内。
+
+我们可以使用以下代码来获取 `lambda.min` 值，以及该 λ 值下的模型系数：
+
+```{r}
+cvfit$lambda.min
+```
+
+```{r}
+coef(cvfit, s = "lambda.min")
+```
+
+为了在 `lambda.1se` 获取对应值，简单地替换 `lambda.min` 为 `lambda.1se`，或省略`s`参数，因为默认值是`lambda.1se`。
+
+注意，这些系数是以稀疏矩阵格式表示的。这是因为沿着正则化路径的解通常是稀疏的，因此使用稀疏格式在时间和空间上更有效。如果您喜欢非稀疏格式，请通过`as.matrix()`输出。
+
+也可以基于拟合的`cv.glmnet`对象进行预测。下面的代码给出了在`lambda.min`下对新输入矩阵`newx`的预测：
+
+```{r}
+predict(cvfit, newx = x[1:5,], s = "lambda.min")
+```
+
+`glmnet` 101 到此结束。有了迄今为止推出的工具，用户可以拟合整个弹性网系列，包括 ridge regression，使用平方误差损失。Package中还有更多的参数，为用户提供了很大的灵活性。要了解更多信息，请转到后面的部分。
+
+
+
+
+
+
+
+
+
+

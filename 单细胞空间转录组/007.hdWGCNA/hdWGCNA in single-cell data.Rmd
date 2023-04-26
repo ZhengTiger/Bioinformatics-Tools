@@ -1,0 +1,277 @@
+---
+title: "hdWGCNA in single-cell data"
+author: "TigerZ"
+date: "2022-10-26"
+output: 
+  html_notebook: 
+    toc: yes
+    toc_depth: 5
+    number_sections: yes
+---
+
+本教程涵盖了使用hdWGCNA对单细胞数据执行共表达网络分析的基础知识。在这里，我们使用来自[这篇文章](https://www.nature.com/articles/s41591-019-0695-9)的人类皮质样本的处理过的snRNA-seq数据集来演示hdWGCNA。该数据集已使用标准单细胞转录组学分析流程（如 Seurat或Scanpy）进行了全面处理。如果您想使用自己的数据集学习本教程，首先需要满足以下先决条件：
+
+* 单细胞或单核转录组学数据集的[Seurat格式](https://www.rdocumentation.org/packages/Seurat/versions/3.0.1/topics/CreateSeuratObject)。\
+* 归一化的基因表达矩阵[NormalizeData](https://satijalab.org/seurat/reference/normalizedata)。\
+* 识别高变基因[VariableFeatures](https://satijalab.org/seurat/reference/findvariablefeatures)。\
+* 标准化的表达数据[ScaleData](https://satijalab.org/seurat/reference/scaledata)。\
+* 执行降维[RunPCA](https://satijalab.org/seurat/reference/runpca)和去除批次效应[RunHarmony](https://www.rdocumentation.org/packages/harmony/versions/1.0/topics/RunHarmony)。\
+* 用于可视化的非线性降维[RunUMAP](https://satijalab.org/seurat/reference/runumap)。\
+* 将细胞分组为clusters [FindNeighbors](https://satijalab.org/seurat/reference/findneighbors)和[FindClusters](https://satijalab.org/seurat/reference/findclusters)。\
+
+运行必备数据处理步骤的示例可参考 [Seurat Guided Clustering Tutorial](https://satijalab.org/seurat/articles/pbmc3k_tutorial.html)。\
+
+此外，还有很多 WGCNA 特有的术语和首字母缩略词，这些都在[这个表格](https://bmcbioinformatics.biomedcentral.com/articles/10.1186/1471-2105-9-559/tables/1)\
+
+# Download the tutorial data
+出于本教程的目的，我们提供了来自 [Zhou et al 2020 study](https://www.nature.com/articles/s41591-019-0695-9) 的正常人类大脑的经过处理的 Seurat 对象。
+```{bash}
+wget https://swaruplab.bio.uci.edu/public_data/Zhou_2020.rds
+```
+
+## Load the dataset and required libraries
+```{r}
+# single-cell analysis package
+library(Seurat)
+
+# plotting and data science packages
+library(tidyverse)
+library(cowplot)
+library(patchwork)
+
+# co-expression network analysis packages:
+library(WGCNA)
+library(hdWGCNA)
+
+# using the cowplot theme for ggplot
+theme_set(theme_cowplot())
+
+# set random seed for reproducibility
+set.seed(12345)
+
+# load the Zhou et al snRNA-seq dataset
+seurat_obj <- readRDS('Zhou_2020.rds')
+```
+
+查看一下分群
+```{r fig.height=1.8, fig.width=2}
+p <- DimPlot(seurat_obj, group.by='cell_type', label=TRUE) +
+   umap_theme() + ggtitle('Zhou et al Control Cortex') + NoLegend()
+p
+```
+
+
+# Set up Seurat object for WGCNA
+在运行 hdWGCNA 之前，我们首先要设置 Seurat 对象。hdWGCNA 计算的大部分信息都存储在 Seurat 对象的 `@misc` 槽中。一个 Seurat 对象可以进行多个 hdWGCNA 实验，例如在同一个单细胞数据集中表示不同的细胞类型。值得注意的是，由于我们将 hdWGCNA 视为下游数据分析步骤，因此我们不支持在运行 `SetupForWGCNA` 后对 Seurat 对象进行 subsetting。
+
+在这里，我们将使用 `SetupForWGCNA` 函数设置 Seurat 对象，指定 hdWGNCA 实验的名称。此功能还选择将用于 WGCNA 的基因。用户可以使用 `gene_select` 参数使用三种不同的方法选择基因：
+
+* `variable`: 使用 Seurat 对象的 `VariableFeatures` 中存储的基因。\
+* `fraction`: 使用由 `group.by` 指定的整个数据集或每组细胞中特定部分细胞中表达的基因。\
+* `custom`: 使用自定义列表中指定的基因。\
+
+在此示例中，我们将选择在该数据集中至少 5% 的细胞中表达的基因，并将我们的 hdWGCNA 实验命名为“tutorial”。
+```{r}
+seurat_obj <- SetupForWGCNA(
+  seurat_obj,
+  gene_select = "fraction", # the gene selection approach
+  fraction = 0.05, # fraction of cells that a gene needs to be expressed in order to be included
+  wgcna_name = "tutorial" # the name of the hdWGCNA experiment
+)
+```
+
+
+# Construct metacells
+在我们设置了 Seurat 对象之后，在 hdWGCNA 中运行 hdWGCNA pipeline 的第一步是从单细胞数据集构建`metacells`。简而言之，metacells是源自相同生物样品的一小组相似细胞的聚集体。KNN算法用于识别要聚合的相似细胞组，然后计算这些细胞的平均或求和表达，从而产生metacells基因表达矩阵。metacells表达矩阵的稀疏性与原始表达矩阵相比大大降低，因此更好使用。我们最初的动机是使用metacells来代替原始的单个细胞，因为 WGCNA 等相关网络方法对数据稀疏性很敏感。此外，单细胞表观基因组方法，例如 [Cicero](https://www.cell.com/molecular-cell/pdfExtended/S1097-2765(18)30547-1)，在构建可访问网络之前采用了类似的metacell聚合方法。\
+
+hdWGCNA 包含一个函数`MetacellsByGroups`来构造给定单细胞数据集的metacell表达矩阵。此函数为内部存储在hdWGCNA实验中的metacell数据集构造一个新的Seurat对象。`group.by` 参数确定将在哪些组中构建metacells。我们只想从来自相同生物样本的细胞构建metacells，因此通过`group.by`参数将该信息传递给hdWGCNA至关重要。此外，我们通常为每种细胞类型分别构建metacells。因此，在此示例中，我们按`Sample`和`cell_type`进行分组以达到预期的结果。\
+
+要聚合的细胞数`k`应根据输入数据集的大小进行调整，通常较小的`k`数可用于小数据集。我们通常使用20到75之间的k值。本教程使用的数据集有40,039个细胞，每个生物样本的细胞数从890到8,188不等，这里我们使用k=25。可以使用`max_shared`参数调整metacells之间允许的重叠量。\
+
+*Note: *我们发现metacell聚合方法对于代表性极低的细胞类型不会产生良好的结果。例如，在此数据集中，脑血管细胞(周细胞和内皮细胞)的代表性最少，我们已将它们排除在此分析之外。`MetacellsByGroups`有一个参数`min_cells`来排除小于指定细胞数的组。\
+
+在这里，我们使用以下代码构造metacells并规范化生成的表达矩阵：
+```{r}
+# construct metacells  in each group
+seurat_obj <- MetacellsByGroups(
+  seurat_obj = seurat_obj,
+  group.by = c("cell_type", "Sample"), # specify the columns in seurat_obj@meta.data to group by
+  reduction = "harmony",
+  k = 25, # nearest-neighbors parameter
+  max_shared = 10, # maximum number of shared cells between two metacells
+  ident.group = 'cell_type' # set the Idents of the metacell seurat object
+)
+
+# normalize metacell expression matrix:
+seurat_obj <- NormalizeMetacells(seurat_obj)
+```
+
+## Optional: Process the Metacell Seurat Object
+由于我们将Metacell表达信息存储为它自己的Seurat对象，因此我们可以对Metacell 数据运行Seurat函数。我们可以使用`GetMetacellObject`从hdWGCNA实验中获取Metacell对象。
+```{r}
+metacell_obj <- GetMetacellObject(seurat_obj)
+```
+
+此外，我们还包含了一些包装函数，用于将Seurat工作流程应用于hdWGCNA实验中的Metacell对象。在这里，我们应用这些包装函数来处理metacell对象并使用UMAP在二维中可视化聚合的表达谱。
+```{r}
+seurat_obj <- NormalizeMetacells(seurat_obj)
+seurat_obj <- ScaleMetacells(seurat_obj, features=VariableFeatures(seurat_obj))
+seurat_obj <- RunPCAMetacells(seurat_obj, features=VariableFeatures(seurat_obj))
+seurat_obj <- RunHarmonyMetacells(seurat_obj, group.by.vars='Sample')
+seurat_obj <- RunUMAPMetacells(seurat_obj, reduction='harmony', dims=1:15)
+
+p1 <- DimPlotMetacells(seurat_obj, group.by='cell_type') + umap_theme() + ggtitle("Cell Type")
+p2 <- DimPlotMetacells(seurat_obj, group.by='Sample') + umap_theme() + ggtitle("Sample")
+
+p1 | p2
+```
+
+
+# Co-expression network analysis
+在本节中，我们将讨论如何使用hdWGNCA对示例数据集中的抑制性神经元(INH)细胞执行共表达网络分析。
+
+## Set up the expression matrix
+在这里，我们指定将用于网络分析的表达矩阵。由于我们只想包括抑制性神经元，因此我们必须在构建网络之前对我们的表达数据进行subset。hdWGCNA包括`SetDatExpr`函数，用于存储将用于下游网络分析的给定细胞组的转置表达矩阵。默认情况下使用metacell表达矩阵 (`use_metacells=TRUE`)，但hdWGCNA确实允许在需要时使用单细胞表达矩阵。此函数允许用户指定从哪个槽获取表达矩阵，例如，如果用户想要应用`SCTransform normalization`而不是`NormalizeData`。
+```{r}
+seurat_obj <- SetDatExpr(
+  seurat_obj,
+  group_name = "INH", # the name of the group of interest in the group.by column
+  group.by='cell_type', # the metadata column containing the cell type info. This same column should have also been used in MetacellsByGroups
+  assay = 'RNA', # using RNA assay
+  slot = 'data' # using normalized data
+)
+```
+
+## Select soft-power threshold
+接下来我们将选择“soft power threshold”。这hdWGNCA流程中极其重要的一步。hdWGCNA 构建`gene-gene correlation adjacency matrix`来推断基因之间的共表达关系。将相关性提高到一个幂以减少相关矩阵中存在的噪声量，从而保留强连接并去除弱连接。因此，确定`soft power threshold`的适当值至关重要。\
+
+我们使用`TestSoftPowers`函数来为不同的软阈值进行参数扫描。此功能通过检查不同power值的结果网络拓扑结构，帮助我们指导我们选择构建共表达网络的软阈值。共表达网络应该具有无标度拓扑，因此`TestSoftPowers`函数模拟了共表达网络在不同软功率阈值下与无标度图的相似程度。此外，我们可以使用函数`PlotSoftPowers`来可视化参数扫描的结果。\
+
+以下代码执行参数扫描并输出摘要图。
+```{r}
+# Test different soft powers:
+seurat_obj <- TestSoftPowers(
+  seurat_obj,
+  networkType = 'signed' # you can also use "unsigned" or "signed hybrid"
+)
+
+# plot the results:
+plot_list <- PlotSoftPowers(seurat_obj)
+```
+
+```{r fig.height=3, fig.width=4}
+# assemble with patchwork
+wrap_plots(plot_list, ncol=2)
+```
+
+WGCNA和hdWGCNA的一般要求是选择无标度拓扑模型拟合大于或等于0.8的最低软阈值，因此在这种情况下，我们选择8为软阈值。如果不设置软阈值，`ConstructNetwork`将自动选择软阈值。\
+
+Parameter sweep的输出结果存储在hdWGCNA experiment中，可以使用`GetPowerTable`函数访问以进行进一步检查：
+```{r}
+power_table <- GetPowerTable(seurat_obj)
+head(power_table)
+```
+
+## Construct co-expression network
+我们现在拥有构建共表达网络所需的一切。这里我们使用hdWGCNA的`ConstructNetwork`函数 ，它在底层调用WGCNA函数`blockwiseConsensusModules`。如果您是高级用户，此函数有很多参数可供使用，但我们选择了适用于许多单细胞数据集的默认参数。`blockwiseConsensusModules`的参数可以直接传递给具有相同参数名称的`ConstructNetwork`。\
+
+以下代码使用上面选择的软阈值来构建共表达网络：
+```{r}
+# construct co-expression network:
+seurat_obj <- ConstructNetwork(
+  seurat_obj, soft_power=8,
+  setDatExpr=FALSE,
+  tom_name = 'INH' # name of the topoligical overlap matrix written to disk
+)
+```
+
+hdWGCNA还包括一个函数`PlotDendrogram`来可视化WGCNA树状图，这是一种常见的可视化，用于显示网络分析产生的不同共表达模块。树状图上的每片叶子代表一个基因，底部的颜色表示共表达模块分配。\
+
+重要的是，“灰色”模块由未分组到任何共表达模块中的基因组成。所有下游分析和解释都应忽略灰色模块。\
+```{r fig.height=1, fig.width=2}
+PlotDendrogram(seurat_obj, main='INH hdWGCNA Dendrogram')
+```
+
+## Optional: inspect the topoligcal overlap matrix (TOM)
+hdWGCNA将共表达网络表示为拓扑重叠矩阵(topoligcal overlap matrix,TOM)。这是一个由基因组成的矩阵，其中每个值都是基因之间的拓扑重叠。TOM 在运行`ConstructNetwork`时被写入磁盘，我们可以使用`GetTOM`函数将其加载到R中。
+```{r}
+TOM <- GetTOM(seurat_obj)
+```
+
+
+# Module Eigengenes and Connectivity
+在本节中，我们将介绍如何计算单个细胞中的模块特征基因，以及如何计算每个基因的基于特征基因的连通性。
+
+## Compute harmonized module eigengenes
+Module Eigengenes (MEs) 是一种常用的指标，用于总结整个共表达模块的基因表达谱。简而言之，模块特征基因是通过对包含每个模块的基因表达矩阵的子集执行主成分分析(PCA)来计算的。这些PCA矩阵中的第一个PC就是ME。\
+
+降维技术是单细胞基因组学中一个非常热门的话题。众所周知，技术误差会使单细胞数据集的分析变得混乱，多年来有许多方法旨在减少这些误差的影响。因此，MEs也将受到这些技术误差的影响，hdWGCNA试图减轻这些影响。\
+
+hdWGCNA包含一个函数`ModuleEigengenes`来计算单个细胞中的模块特征基因。此外，我们允许用户对MEs应用Harmony进行批次校正，从而产生协调的模块特征基因 (harmonized module eigengenes, hME)。以下代码使用`group.by.vars`参数执行由原始样本协调的模块特征基因计算。\
+
+```{r}
+# need to run ScaleData first or else harmony throws an error:
+seurat_obj <- ScaleData(seurat_obj, features=VariableFeatures(seurat_obj))
+
+# compute all MEs in the full single-cell dataset
+seurat_obj <- ModuleEigengenes(
+ seurat_obj,
+ group.by.vars="Sample"
+)
+```
+
+ME矩阵存储为一个矩阵，其中每一行是一个细胞，每一列是一个模块。可以使用`GetMEs` 函数从Seurat对象中提取此矩阵，该函数默认检索hMEs。
+```{r}
+# harmonized module eigengenes:
+hMEs <- GetMEs(seurat_obj)
+
+# module eigengenes:
+MEs <- GetMEs(seurat_obj, harmonized=FALSE)
+```
+
+## Compute module connectivity
+在共表达网络分析中，我们经常希望关注“hub genes”，即在每个模块内高度连接的那些。因此，我们希望确定每个基因的基于特征基因的连接性，也称为kME。hdWGCNA包括`ModuleConnectivity`来计算完整单细胞数据集中的kME值，而不是metacell数据集。该函数本质上计算基因和模块特征基因之间的成对相关性。可以为数据集中的所有细胞计算kME，但我们建议在以前用于运行`ConstructNetwork`的细胞类型或组中计算kME。
+```{r}
+# compute eigengene-based connectivity (kME):
+seurat_obj <- ModuleConnectivity(
+  seurat_obj,
+  group.by = 'cell_type', group_name = 'INH'
+)
+```
+
+为方便起见，我们重新命名hdWGCNA模块以表明它们来自抑制性神经元组。有关重命名模块的更多信息，请参见[module customization tutorial](https://smorabit.github.io/hdWGCNA/articles/customization.html)\
+```{r}
+# rename the modules
+seurat_obj <- ResetModuleNames(
+  seurat_obj,
+  new_name = "INH-M"
+)
+```
+
+我们可以使用 PlotKMEs 函数可视化每个模块中按 kME 排序的基因。
+```{r fig.height=2, fig.width=4, message=FALSE, warning=FALSE}
+# plot genes ranked by kME for each module
+p <- PlotKMEs(seurat_obj, ncol=5)
+
+p
+```
+
+## Getting the module assignment table
+hdWGCNA 允许使用 `GetModules` 函数轻松访问 module assignment table。 该表由三列组成：`gene_name`: 存储基因的符号或 ID，`module`: 存储基因的模块分配，`color`: 存储每个模块的颜色映射，用于许多下游绘图步骤。 如果在此 hdWGCNA 实验中调用了`ModuleConnectivity`，则此表将具有每个模块的 kME 的附加列。
+```{r}
+# get the module assignment table:
+modules <- GetModules(seurat_obj)
+
+# show the first 6 columns:
+head(modules[,1:6])
+```
+可以使用 GetHubGenes 函数提取按 kME 排序的前 N 个中心基因的表。
+```{r}
+# get hub genes
+hub_df <- GetHubGenes(seurat_obj, n_hubs = 10)
+
+head(hub_df)
+```
+
+
+

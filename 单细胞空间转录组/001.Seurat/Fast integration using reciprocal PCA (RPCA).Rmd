@@ -1,0 +1,148 @@
+---
+title: "Fast integration using reciprocal PCA (RPCA)"
+author: TigerZ
+date: 2023-2-1
+output: 
+  html_notebook: 
+    toc: yes
+    css: F:/Github/learn/R/notebook.css
+    number_sections: yes
+---
+
+在这一小节中，我们展示了一个略微修改的 scRNA-seq 数据 integration 工作流程。我们没有利用 canonical correlation analysis(‘CCA’) 来识别 anchors，而是利用 reciprocal PCA (‘RPCA’)。当使用 RPCA 确定任意两个数据集之间的 anchors 时，我们将每个数据集投影到其他 PCA 空间中，并通过相同的相互邻域要求约束 anchors。这两种工作流程的命令在很大程度上是相同的，但是这两种方法可能适用于不同的情景。
+
+通过识别数据集之间共享的变异源，CCA 非常适合在细胞类型保守但不同实验的基因表达存在很大差异时识别 anchors。因此，当实验条件或疾病状态引入非常强烈的表达变化时，或者当跨模式和物种整合数据集时，基于 CCA 的整合可以进行综合分析。然而，基于 CCA 的整合也可能导致过度校正，尤其是当大部分细胞在数据集中不重叠时。
+
+基于 RPCA 的整合运行速度明显更快，并且还代表了一种更保守的方法，其中处于不同生物状态的细胞在整合后不太可能“对齐”。因此，我们建议在以下情况的整合分析期间使用 RPCA：
+
+- 一个数据集中的相当一部分细胞在另一个数据集中没有匹配类型 
+- 数据集来自同一平台（即 10x 基因组学的多个通道） 
+- 有大量数据集或要整合的细胞
+
+下面，我们演示了使用 reciprocal PCA 来对齐在我们介绍上一节中介绍的数据集。虽然命令列表几乎相同，但此工作流要求用户在整合之前对每个数据集单独运行主成分分析 (PCA)。在运行 `FindIntegrationAnchors()` 时，用户还应将“reduction”参数设置为“rpca”。
+
+```{r}
+library(SeuratData)
+# install dataset
+InstallData("ifnb")
+```
+
+```{r}
+# load dataset
+LoadData("ifnb")
+
+# split the dataset into a list of two seurat objects (stim and CTRL)
+ifnb.list <- SplitObject(ifnb, split.by = "stim")
+
+# normalize and identify variable features for each dataset independently
+ifnb.list <- lapply(X = ifnb.list, FUN = function(x) {
+    x <- NormalizeData(x)
+    x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+})
+
+# select features that are repeatedly variable across datasets for integration run PCA on each
+# dataset using these features
+features <- SelectIntegrationFeatures(object.list = ifnb.list)
+ifnb.list <- lapply(X = ifnb.list, FUN = function(x) {
+    x <- ScaleData(x, features = features, verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE)
+})
+```
+
+
+
+# Perform integration
+
+然后，我们使用 `FindIntegrationAnchors()` 函数识别 anchors，该函数将 Seurat 对象列表作为输入，并使用这些 anchors 和 `IntegrateData()` 函数将两个数据集整合在一起。
+
+```{r}
+immune.anchors <- FindIntegrationAnchors(object.list = ifnb.list, anchor.features = features, reduction = "rpca")
+```
+
+```{r}
+# this command creates an 'integrated' data assay
+immune.combined <- IntegrateData(anchorset = immune.anchors)
+```
+
+现在我们可以对所有细胞进行单一的综合分析！
+
+```{r}
+# specify that we will perform downstream analysis on the corrected data note that the
+# original unmodified data still resides in the 'RNA' assay
+DefaultAssay(immune.combined) <- "integrated"
+
+# Run the standard workflow for visualization and clustering
+immune.combined <- ScaleData(immune.combined, verbose = FALSE)
+immune.combined <- RunPCA(immune.combined, npcs = 30, verbose = FALSE)
+immune.combined <- RunUMAP(immune.combined, reduction = "pca", dims = 1:30)
+immune.combined <- FindNeighbors(immune.combined, reduction = "pca", dims = 1:30)
+immune.combined <- FindClusters(immune.combined, resolution = 0.5)
+```
+
+```{r fig.height=1.5, fig.width=3.5}
+# Visualization
+p1 <- DimPlot(immune.combined, reduction = "umap", group.by = "stim")
+p2 <- DimPlot(immune.combined, reduction = "umap", group.by = "seurat_annotations", label = TRUE, repel = TRUE)
+p1 + p2
+```
+
+
+
+# Modifying the strength of integration
+
+结果表明，基于 rpca 的整合更为保守，在这种情况下，不能在实验中完美对齐细胞子集（which are naive and memory T cells）。您可以通过增加 `k.anchor` 参数来增加对齐强度，该参数默认设置为 5。将此参数增加到 20 将有助于对齐这些类群。
+
+```{r}
+immune.anchors <- FindIntegrationAnchors(object.list = ifnb.list, anchor.features = features, reduction = "rpca",
+    k.anchor = 20)
+immune.combined <- IntegrateData(anchorset = immune.anchors)
+
+immune.combined <- ScaleData(immune.combined, verbose = FALSE)
+immune.combined <- RunPCA(immune.combined, npcs = 30, verbose = FALSE)
+immune.combined <- RunUMAP(immune.combined, reduction = "pca", dims = 1:30)
+immune.combined <- FindNeighbors(immune.combined, reduction = "pca", dims = 1:30)
+immune.combined <- FindClusters(immune.combined, resolution = 0.5)
+```
+
+```{r fig.height=1.5, fig.width=3.5}
+# Visualization
+p1 <- DimPlot(immune.combined, reduction = "umap", group.by = "stim")
+p2 <- DimPlot(immune.combined, reduction = "umap", label = TRUE, repel = TRUE)
+p1 + p2
+```
+
+现在数据集已经整合，您可以按照 [introduction to scRNA-seq integration vignette](https://satijalab.org/seurat/articles/integration_introduction.html) 中介绍的步骤来识别细胞类型和特定于细胞类型的反应。
+
+
+
+# Performing integration on datasets normalized with SCTransform
+
+作为另一个示例，我们重复上面执行的分析，但使用 SCTransform 对数据集进行归一化。我们可以选择将 `method` 参数设置为 `glmGamPoi`（install [here](https://bioconductor.org/packages/release/bioc/html/glmGamPoi.html)），以便更快地估计 `SCTransform()` 中的回归参数。
+
+```{r}
+LoadData("ifnb")
+ifnb.list <- SplitObject(ifnb, split.by = "stim")
+ifnb.list <- lapply(X = ifnb.list, FUN = SCTransform, method = "glmGamPoi")
+features <- SelectIntegrationFeatures(object.list = ifnb.list, nfeatures = 3000)
+ifnb.list <- PrepSCTIntegration(object.list = ifnb.list, anchor.features = features)
+ifnb.list <- lapply(X = ifnb.list, FUN = RunPCA, features = features)
+```
+
+```{r}
+immune.anchors <- FindIntegrationAnchors(object.list = ifnb.list, normalization.method = "SCT", anchor.features = features, dims = 1:30, reduction = "rpca", k.anchor = 20)
+immune.combined.sct <- IntegrateData(anchorset = immune.anchors, normalization.method = "SCT", dims = 1:30)
+```
+
+```{r}
+immune.combined.sct <- RunPCA(immune.combined.sct, verbose = FALSE)
+immune.combined.sct <- RunUMAP(immune.combined.sct, reduction = "pca", dims = 1:30)
+```
+
+```{r fig.height=1.5, fig.width=3.5}
+# Visualization
+p1 <- DimPlot(immune.combined.sct, reduction = "umap", group.by = "stim")
+p2 <- DimPlot(immune.combined.sct, reduction = "umap", group.by = "seurat_annotations", label = TRUE,
+    repel = TRUE)
+p1 + p2
+```
+

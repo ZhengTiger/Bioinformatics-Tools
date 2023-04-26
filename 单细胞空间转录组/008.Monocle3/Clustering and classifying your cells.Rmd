@@ -1,0 +1,490 @@
+---
+title: "Monocle3 Tutorial --- Clustering and classifying your cells"
+output:
+  html_notebook: 
+    toc: yes
+    css: "C:/Users/13081/OneDrive - webmail.hzau.edu.cn/Github/learn/R/notebook.css"
+    number_sections: yes
+  html_document:
+    toc: yes
+    df_print: paged
+---
+
+
+单细胞实验通常在包含多种细胞类型的组织上进行。Monocle 3 提供了一组简单的函数，您可以使用它们根据基因表达谱将细胞分组到 clusters 中。细胞通常形成对应于一种细胞类型或一组高度相关的细胞类型的 clusters。Monocle 3 使用的技术在 scRNA-seq 分析中被广泛接受，并且类似于 [Seurat](https://satijalab.org/seurat/)、[scanpy](https://scanpy.readthedocs.io/en/stable/) 和其他工具使用的方法。
+
+在本节中，您将学习如何使用 Monocle 3 对细胞进行聚类。我们将展示用于聚类的主要函数，使用的数据是来自 [Cao & Packer et al](https://science.sciencemag.org/content/357/6352/661) 的秀丽隐杆线虫数据。这项研究描述了如何在称为“sci-RNA-seq”的方案中使用组合索引进行 scRNA-seq。Cao & Packer et al. 使用 sci-RNA-seq 对整个动物进行了第一次单细胞 RNA-seq 分析，因此数据中代表了许多细胞类型。您可以在 UW Genome Sciences [RNA Atlas of the Worm](https://atlas.gs.washington.edu/worm-rna/) 网站上了解有关数据集的更多信息，并查看作者如何执行原始分析。
+
+您可以像这样将数据加载到 Monocle 3 中：
+```{r}
+library(monocle3)
+library(dplyr) # imported for some downstream data manipulation
+
+expression_matrix <- readRDS(url("https://depts.washington.edu:/trapnell-lab/software/monocle3/celegans/data/cao_l2_expression.rds"))
+cell_metadata <- readRDS(url("https://depts.washington.edu:/trapnell-lab/software/monocle3/celegans/data/cao_l2_colData.rds"))
+gene_annotation <- readRDS(url("https://depts.washington.edu:/trapnell-lab/software/monocle3/celegans/data/cao_l2_rowData.rds"))
+
+cds <- new_cell_data_set(expression_matrix,
+                         cell_metadata = cell_metadata,
+                         gene_metadata = gene_annotation)
+```
+
+
+# Pre-process the data
+现在数据都加载好了，我们需要对其进行预处理。这一步是您告诉 Monocle 3 您希望如何 normalize 数据、是否使用 [Principal Components Analysis](https://en.wikipedia.org/wiki/Principal_component_analysis)（RNA-seq 的标准）或 [ Latent Semantic Indexing ](https://en.wikipedia.org/wiki/Latent_semantic_analysis)（在 ATAC-seq 中常见）以及如何消除任何 batch effects 的地方。在本演示中，我们将只使用标准 PCA 方法。使用 PCA 时，您应该指定希望 Monocle 计算的主成分数。
+
+```{r}
+cds <- preprocess_cds(cds, num_dim = 100)
+```
+
+最好检查一下您是否使用了足够多的 PCs 来捕获数据集中所有细胞的大部分基因表达变化。
+您可以使用 `plot_pc_variance_explained()` 查看每个 PC 的可解释变异分数：
+
+```{r}
+plot_pc_variance_explained(cds)
+```
+
+我们可以看到，使用超过 100 个 PC 只会捕获少量的额外变异，并且每增加一个 PC 都会使 Monocle 中的下游步骤变慢。
+
+# Reduce dimensionality and visualize the cells
+现在我们准备好可视化细胞。为此，您可以使用在 scRNAseq 中非常流行的 t-SNE 或越来越常见的 UMAP。Monocle 3 默认使用 UMAP，因为我们认为它更快，更适合 RNA-seq 中的聚类和轨迹分析。要将数据降维到 X、Y 平面以便我们可以轻松绘制它，请调用 `reduce_dimension()`：
+
+```{r}
+cds <- reduce_dimension(cds)
+```
+
+要绘制数据，请使用 Monocle 的主要绘图函数 `plot_cells()`：
+
+```{r}
+plot_cells(cds)
+```
+
+上图中的每个点代表 `cell_data_set` 对象 `cds` 中的不同细胞。如您所见，细胞形成许多 groups，一些有数千个细胞，一些只有几个。Cao & Packer 通过查看每个细胞表达的基因，根据类型手动注释每个细胞。我们可以使用 `plot_cells()` 的 `color_cells_by` 参数，根据作者的原始注释为 UMAP 图中的细胞着色。
+
+```{r}
+plot_cells(cds, color_cells_by="cao_cell_type")
+```
+
+您可以看到许多细胞类型在 UMAP 图中彼此非常靠近。
+
+除了稍后描述的少数情况外，`color_cells_by` 可以是 `colData(cds)` 中任意列的名称。请注意，当 `color_cells_by` 是分类变量时，标签会添加到图中，每个标签大致位于所有具有该标签的细胞的中间。
+
+您还可以根据细胞表达的一个基因或一组基因的数量来为细胞着色：
+
+```{r}
+plot_cells(cds, genes=c("cpna-2", "egl-21", "ram-2", "inos-1"))
+```
+
+--------------------------------------------------------------------------------
+
+**Faster clustering with UMAP**
+如果您有一个相对较大的数据集（具有 >10,000 个或更多的细胞），您可能希望利用可以加速 UMAP 的选项。将 `umap.fast_sgd=TRUE` 传递给 `reduce_dimension()` 将在 UMAP 内部使用快速随机梯度下降法。如果您的计算机有多个内核，您可以使用 `cores` 参数使 UMAP 成为多线程的。但是，使用这些选项中的任何一个调用 `reduce_dimension()` 都会使其在每次运行时产生略有不同的输出。如果您可以接受，您会发现 `reduction_dimension()` 的运行时间显着减少。
+
+--------------------------------------------------------------------------------
+
+如果需要，您还可以使用 t-SNE 可视化您的数据。首先，使用 `reduction_method="tSNE"` 调用 `reduce_dimension`。
+
+```{r}
+cds <- reduce_dimension(cds, reduction_method="tSNE")
+```
+
+然后，当您调用 `plot_cells()` 时，也将 `reduction_method="tSNE"` 传递给它：
+
+```{r}
+plot_cells(cds, reduction_method="tSNE", color_cells_by="cao_cell_type")
+```
+
+您实际上可以在同一个 `cds` 对象上使用 UMAP 和 t-SNE 一个不会覆盖另一个的结果。但是您必须在 `plot_cells` 等下游函数中指定您想要的那个。
+
+# Check for and remove batch effects
+在进行基因表达分析时，重要的是检查 batch effects，这是在不同实验批次中测量的细胞转录组的系统差异。这些本质上可能是技术性的，例如在单细胞 RNA-seq protocol 中引入的那些，也可能是生物性的，例如可能来自不同窝小鼠的那些。如何识别批次效应并对其进行解释，以免它们混淆您的分析可能是一个复杂的问题，但 Monocle 提供了处理它们的工具。
+
+执行降维时，应始终检查批批次效应。您应该向 `colData` 添加一列，对每个细胞来自哪个批次进行编码。然后您可以简单地按批次为细胞着色。`Cao & Packer et al` 等人在他们的数据中包含一个“plate”注释，指定每个细胞来自哪个 sci-RNA-seq plate。按 plate 对 UMAP 着色显示：
+
+```{r}
+plot_cells(cds, color_cells_by="plate", label_cell_groups=FALSE)
+```
+
+该数据中的显着批次效应并不明显。如果数据包含因 plate 而产生的更大变化，我们希望看到实际上仅来自一个 plate 的细胞组。尽管如此，我们可以尝试通过运行 `align_cds()` 函数来消除批次效应：
+
+```{r}
+cds <- align_cds(cds, num_dim = 100, alignment_group = "plate")
+cds <- reduce_dimension(cds)
+```
+
+```{r}
+plot_cells(cds, color_cells_by="plate", label_cell_groups=FALSE)
+```
+
+当使用 `alignment_group` 参数运行时，`align_cds()` 会尝试使用 [mutual nearest neighbor alignment](https://doi.org/10.1038/nbt.4091) 来消除批次效应，这是 John Marioni 实验室介绍的一种技术。Monocle 3 通过调用 Aaron Lun 的 [batchelor](https://bioconductor.org/packages/release/bioc/html/batchelor.html) 包 来做到这一点。如果您使用 `align_cds()`，请务必调用 `get_citations()` 以了解您应该如何引用 Monocle 所依赖的软件。
+
+# Group cells into clusters
+将细胞分组到 clusters 中是识别数据中细胞类型的重要步骤。Monocle 使用一种称为 [community detection](https://doi.org/10.1038/s41598-019-41695-z) 的技术对细胞进行分组。这种方法由 Levine 等人介绍，作为 phenoGraph 算法的一部分。您可以使用 `cluster_cells()` 函数对细胞进行聚类，如下所示：
+
+```{r}
+cds <- cluster_cells(cds, resolution=1e-5)
+```
+
+```{r}
+plot_cells(cds)
+```
+
+请注意，现在当我们调用不带参数的 `plot_cells()` 时，它会根据默认值按 cluster 为细胞着色。
+
+`cluster_cells()` 还将细胞划分为更大、分离更充分的组，称为 partitions，使用 Alex Wolf 等人的统计测试，作为其 PAGA 算法的一部分引入。您可以像这样可视化这些分区：
+
+```{r}
+plot_cells(cds, color_cells_by="partition", group_cells_by="partition")
+```
+
+运行 `cluster_cells()` 后，`plot_cells()` 函数将根据您要为细胞着色的方式分别标记每个细胞 cluster。例如，下面的调用根据细胞类型注释为细胞着色，并且每个 cluster 根据其中最常见的注释进行标记：
+
+```{r}
+plot_cells(cds, color_cells_by="cao_cell_type")
+```
+
+您可以通过传递 `group_cells_by="partition"` 来选择标记整个分区而不是 clusters。您还可以通过将 `labels_per_group=2` 传递给 `plot_cells()` 来绘制每个 cluster 的前 2 个标签。最后，您可以禁用此标记策略，使 `plot_cells()` 的行为与调用 `cluster_cells()` 之前一样，如下所示：
+
+```{r}
+plot_cells(cds, color_cells_by="cao_cell_type", label_groups_by_cluster=FALSE)
+```
+
+# Find marker genes expressed by each cluster
+
+一旦细胞聚集在一起，我们就可以询问是什么基因使它们彼此不同。为此，首先调用 `top_markers()` 函数：
+
+```{r}
+marker_test_res <- top_markers(cds, group_cells_by="partition", 
+                               reference_cells=1000, cores=8)
+```
+
+数据框 `marker_test_res` 包含许多指标，用于衡量每个基因在每个分区中的具体表达方式。
+我们可以根据 cluster, partition 或 colData(cds) 中的任何分类变量对细胞进行分组。
+您可以根据一个或多个特异性指标对表格进行排名，并为每个 cluster 取 top gene。例如，`pseudo_R2` 就是这样一种措施。我们可以像这样根据 `pseudo_R2` 对 markers 进行排序：
+
+```{r}
+top_specific_markers <- marker_test_res %>%
+                            filter(fraction_expressing >= 0.10) %>%
+                            group_by(cell_group) %>%
+                            top_n(1, pseudo_R2)
+
+top_specific_marker_ids <- unique(top_specific_markers %>% pull(gene_id))
+```
+
+现在，我们可以使用 `plot_genes_by_group` 函数绘制每个组中表达每个 marker 的细胞的表达和分数：
+
+```{r}
+plot_genes_by_group(cds,
+                    top_specific_marker_ids,
+                    group_cells_by="partition",
+                    ordering_type="maximal_on_diag",
+                    max.size=3)
+```
+
+查看多个标记通常会提供信息，只需将第一个参数更改为 `top_n()` 即可：
+
+```{r fig.height=4, fig.width=4}
+top_specific_markers <- marker_test_res %>%
+                            filter(fraction_expressing >= 0.10) %>%
+                            group_by(cell_group) %>%
+                            top_n(3, pseudo_R2)
+
+top_specific_marker_ids <- unique(top_specific_markers %>% pull(gene_id))
+
+plot_genes_by_group(cds,
+                    top_specific_marker_ids,
+                    group_cells_by="partition",
+                    ordering_type="cluster_row_col",
+                    max.size=3)
+```
+
+有许多方法可以比较和对比细胞 clusters（and other groupings）。稍后我们将在 [differential expression analysis](https://cole-trapnell-lab.github.io/monocle3/docs/differential) 部分详细探讨它们。
+
+# Annotate your cells according to type
+识别数据集中每个细胞的类型对于许多下游分析至关重要。有几种方法可以做到这一点。一种常用的方法是首先将细胞聚类，然后根据其基因表达谱为每个 cluster 分配一种细胞类型。我们已经看到了如何使用 `top_markers()`。回顾与标记基因相关的文献通常会给出表达它的 cluster 的身份的强烈指示。在 Cao & Packer > et al 中，作者查阅了文献和基因表达数据库以寻找限制在每个 cluster 中的标记，以便分配包含在 `colData(cds)$cao_cell_type` 中的身份。
+
+要根据聚类分配细胞类型，我们首先在 `colData(cds)` 中创建一个新列，并使用 `partitions(cds)` 的值对其进行初始化（也可以使用 `clusters(cds)`，具体取决于您的数据集）：
+
+```{r}
+colData(cds)$assigned_cell_type <- as.character(partitions(cds))
+```
+
+现在，我们可以使用 `dplyr` 包 的 `recode()` 函数将每个 cluster 重新映射到不同的细胞类型：
+
+```{r}
+colData(cds)$assigned_cell_type <- dplyr::recode(colData(cds)$assigned_cell_type,
+                                                 "1"="Body wall muscle",
+                                                 "2"="Germline",
+                                                 "3"="Motor neurons",
+                                                 "4"="Seam cells",
+                                                 "5"="Sex myoblasts",
+                                                 "6"="Socket cells",
+                                                 "7"="Marginal_cell",
+                                                 "8"="Coelomocyte",
+                                                 "9"="Am/PH sheath cells",
+                                                 "10"="Ciliated neurons",
+                                                 "11"="Intestinal/rectal muscle",
+                                                 "12"="Excretory gland",
+                                                 "13"="Chemosensory neurons",
+                                                 "14"="Interneurons",
+                                                 "15"="Unclassified eurons",
+                                                 "16"="Ciliated neurons",
+                                                 "17"="Pharyngeal gland cells",
+                                                 "18"="Unclassified neurons",
+                                                 "19"="Chemosensory neurons",
+                                                 "20"="Ciliated neurons",
+                                                 "21"="Ciliated neurons",
+                                                 "22"="Inner labial neuron",
+                                                 "23"="Ciliated neurons",
+                                                 "24"="Ciliated neurons",
+                                                 "25"="Ciliated neurons",
+                                                 "26"="Hypodermal cells",
+                                                 "27"="Mesodermal cells",
+                                                 "28"="Motor neurons",
+                                                 "29"="Pharyngeal gland cells",
+                                                 "30"="Ciliated neurons",
+                                                 "31"="Excretory cells",
+                                                 "32"="Amphid neuron",
+                                                 "33"="Pharyngeal muscle")
+```
+
+让我们看看新注释的样子：
+
+```{r}
+plot_cells(cds, group_cells_by="partition", color_cells_by="assigned_cell_type")
+```
+
+Partition 7 有一些子结构，仅从 `top_markers()` 的输出来看它对应于什么细胞类型或类型并不明显。所以我们可以用 `choose_cells()` 函数隔离出来做进一步分析：
+
+```{r}
+cds_subset <- choose_cells(cds)
+```
+
+现在我们有一个较小的 `cell_data_set` 对象，它只包含我们想要钻取的分区中的细胞。我们可以使用 `graph_test()` 来识别在该分区的不同细胞子集中差异表达的基因：
+
+```{r}
+pr_graph_test_res <- graph_test(cds_subset, neighbor_graph="knn", cores=8)
+pr_deg_ids <- row.names(subset(pr_graph_test_res, morans_I > 0.01 & q_value < 0.05))
+```
+
+我们将在后面的 [differential expression analysis](https://cole-trapnell-lab.github.io/monocle3/docs/differential/#gene-modules) 部分详细了解 `graph_test()`。我们可以获取在这组细胞中发生变化的所有基因，并将具有相似表达模式的基因分组到模块中：
+
+```{r}
+gene_module_df <- find_gene_modules(cds_subset[pr_deg_ids,], resolution=1e-3)
+```
+
+绘制这些模块的聚合表达值可以揭示哪些细胞表达哪些模式。
+
+```{r}
+plot_cells(cds_subset, genes=gene_module_df, 
+           show_trajectory_graph=FALSE, 
+           label_cell_groups=FALSE)
+```
+
+您可以探索每个模块中的基因或对它们进行 [gene ontology enrichment analysis](http://geneontology.org/)，以收集有关存在哪些细胞类型的见解。假设在这样做之后我们对分区中的细胞类型有了很好的了解。让我们以更精细的分辨率重新聚类细胞，然后查看它们如何与分区中的聚类重叠：
+
+```{r}
+cds_subset <- cluster_cells(cds_subset, resolution=1e-2)
+plot_cells(cds_subset, color_cells_by="cluster")
+```
+
+根据模式的排列方式，我们将进行以下分配：
+
+```{r}
+colData(cds_subset)$assigned_cell_type <- as.character(clusters(cds_subset)[colnames(cds_subset)])
+colData(cds_subset)$assigned_cell_type <- dplyr::recode(colData(cds_subset)$assigned_cell_type,
+                                                        "1"="Sex myoblasts",
+                                                        "2"="Somatic gonad precursors",
+                                                        "3"="Vulval precursors",
+                                                        "4"="Sex myoblasts",
+                                                        "5"="Vulval precursors",
+                                                        "6"="Somatic gonad precursors",
+                                                        "7"="Sex myoblasts",
+                                                        "8"="Sex myoblasts",
+                                                        "9"="Ciliated neurons",
+                                                        "10"="Vulval precursors",
+                                                        "11"="Somatic gonad precursor",
+                                                        "12"="Distal tip cells",
+                                                        "13"="Somatic gonad precursor",
+                                                        "14"="Sex myoblasts",
+                                                        "15"="Vulval precursors")
+
+plot_cells(cds_subset, group_cells_by="cluster", color_cells_by="assigned_cell_type")
+```
+
+现在我们可以将注释从 `cds_subset` 对象传输回完整数据集。我们也会在这个阶段过滤掉低质量的细胞。
+
+```{r}
+colData(cds)[colnames(cds_subset),]$assigned_cell_type <- colData(cds_subset)$assigned_cell_type
+cds <- cds[,colData(cds)$assigned_cell_type != "Failed QC" | is.na(colData(cds)$assigned_cell_type )]
+plot_cells(cds, group_cells_by="partition", 
+           color_cells_by="assigned_cell_type", 
+           labels_per_group=5)
+```
+
+# Automated annotation with Garnett
+
+上述按类型手动注释细胞的过程可能很费力，如果底层 cluster 发生变化，则必须重新完成。我们最近开发了 [Garnett](https://cole-trapnell-lab.github.io/garnett/)，一种用于自动注释细胞的软件工具包。Garnett 根据标记基因对细胞进行分类。如果您经历过手动注释细胞的麻烦，Monocle 可以生成一个可与 Garnett 一起使用的标记基因文件。这将帮助您在将来注释其他数据集，或者如果您在将来改进分析并更新聚类，则可以重新注释这个数据集。
+
+要生成 Garnett 文件，首先要找到每个带注释的细胞类型表达的顶部标记：
+
+```{r}
+assigned_type_marker_test_res <- top_markers(cds,
+                                             group_cells_by="assigned_cell_type",
+                                             reference_cells=1000,
+                                             cores=8)
+```
+
+接下来，根据您想要的严格程度过滤这些标记：
+
+```{r}
+# Require that markers have at least JS specificty score > 0.5 and
+# be significant in the logistic test for identifying their cell type:
+garnett_markers <- assigned_type_marker_test_res %>%
+                        filter(marker_test_q_value < 0.01 & specificity >= 0.5) %>%
+                        group_by(cell_group) %>%
+                        top_n(5, marker_score)
+# Exclude genes that are good markers for more than one cell type:
+garnett_markers <- garnett_markers %>% 
+                        group_by(gene_short_name) %>%
+                        filter(n() == 1)
+```
+
+然后调用 `generate_garnett_marker_file`：
+
+```{r}
+generate_garnett_marker_file(garnett_markers, file="./marker_file.txt")
+```
+
+`generate_garnett_marker_file` 将生成如下文本文件：
+
+```{}
+> Cell type Ciliated sensory neurons
+expressed: che-3, scd-2, C33A12.4, R102.2, F27C1.11
+
+> Cell type Non-seam hypodermis
+expressed: col-14, col-180, F11E6.3, grsp-1, C06A8.3
+
+> Cell type Seam cells
+expressed: col-65, col-77, col-107, ram-2, Y47D7A.13
+
+> Cell type Vulval precursors
+expressed: col-68, col-145, lin-31, osm-11, Y62E10A.19
+
+> Cell type Body wall muscle
+expressed: csq-1, hum-9, cpna-2, tag-278, F41C3.5
+
+> Cell type Coelomocytes
+expressed: cup-4, inos-1, Y73F4A.1, ZC116.3, aman-1
+
+> Cell type flp-1 interneurons
+expressed: daf-10, flp-1, nlp-10, zig-2, H05L03.3
+
+> Cell type Sex myoblasts
+expressed: egl-15, C04E12.2
+
+> Cell type Intestinal/rectal muscle
+expressed: egl-20, lbp-2, bgal-1, ttr-10, T23B12.8
+
+> Cell type Am/PH sheath cells
+expressed: far-8, F35B12.9, ZK822.4, F20A1.1, T02B11.3
+
+> Cell type Oxygen sensory neurons
+expressed: flp-17, gcy-9, gcy-33, ist-1, Y57G11B.97
+
+> Cell type Pharyngeal neurons
+expressed: flr-2, nlp-6, F14B6.2, degt-1, flp-28
+
+> Cell type Unclassified neurons
+expressed: gar-2, madd-4, twk-49
+
+> Cell type Germline
+expressed: gld-1, pgl-1, ppw-2, prg-2, cbd-1
+
+> Cell type Somatic gonad precursors
+expressed: inx-9, mnm-2, C36B7.4
+
+> Cell type Touch receptor neurons
+expressed: mec-1, mec-7, mec-12, mec-17, mec-18
+
+> Cell type Pharyngeal epithelia
+expressed: pgp-14, pqn-74, fipr-2, R03C1.1, Y73F4A.2
+
+> Cell type Pharyngeal muscle
+expressed: pqn-29, F31D4.5, R13H4.8, T01B7.8, T20B6.3
+
+> Cell type Pharyngeal gland
+expressed: F15A4.6, dod-6, C49G7.3, M04G7.1, phat-4
+
+> Cell type Canal associated neurons
+expressed: acbp-6, Y66D12A.14, ZC412.4, C32E8.6, C41A3.1
+```
+
+`generate_garnett_marker_file()` 生成的标记文件只是使用 `Garnett` 对细胞进行分类的起点。您可能想要编辑此文件以添加或删除基于文献或其他信息的标记。您还应该考虑定义细胞的子类型，这可以大大增加 `Garnett` 的实用性和准确性。例如，L2 数据包含许多不同类型的神经元。在上面的文件中制作一个“Neuron”细胞类型，然后使用关键字 subtype 来组织神经元的各种亚型，这将使 `Garnett` 更能够识别它们并将它们与非神经元细胞类型区分开来。当您的两种或多种细胞类型在 `plot_genes_by_group()` 中共享它们的大部 top markers 时，请考虑定义一个更广泛的细胞类型定义，它们都是其子类型。您可能还想通过对上面的 `cds` 对象进行子集化并在它们上运行 `top_markers()` 来为神经元的各种子类型定义标记。有关如何丰富标记文件的更多信息，请参阅 [Garnett documentation](https://cole-trapnell-lab.github.io/garnett/docs_m3/)。
+
+当您准备好运行 Garnett 时，加载包：
+
+--------------------------------------------------------------------------------
+
+**Garnett for Monocle 3**
+
+Garnett 最初是为与 Monocle 2 一起工作而编写的。我们已经创建了 Garnett 的一个分支，它与 Monocle 3 一起工作，最终将取代主分支。同时，您必须安装并加载 Garnett 的 Monocle 3 分支！
+
+--------------------------------------------------------------------------------
+
+```{r}
+## Install the monocle3 branch of garnett
+BiocManager::install(c("org.Mm.eg.db", "org.Hs.eg.db"))
+devtools::install_github("cole-trapnell-lab/garnett", ref="monocle3")
+```
+
+```{r}
+library(garnett)
+# install gene database for worm
+BiocManager::install("org.Ce.eg.db")
+```
+
+现在根据您的标记文件训练 Garnett 分类器，如下所示：
+
+```{r}
+colData(cds)$garnett_cluster <- clusters(cds)
+worm_classifier <- train_cell_classifier(cds = cds,
+                                         marker_file = "./marker_file.txt", 
+                                         db=org.Ce.eg.db::org.Ce.eg.db,
+                                         cds_gene_id_type = "ENSEMBL",
+                                         num_unknown = 50,
+                                         marker_file_gene_id_type = "SYMBOL",
+                                         cores=8)
+```
+
+现在我们已经训练了一个分类器 `worm_classifier`，我们可以使用它根据类型对 L2 单元格进行注释：
+
+```{r}
+cds <- classify_cells(cds, worm_classifier,
+                      db = org.Ce.eg.db::org.Ce.eg.db,
+                      cluster_extend = TRUE,
+                      cds_gene_id_type = "ENSEMBL")
+```
+
+以下是 Garnett 对单细胞进行注释的方式：
+
+```{r}
+plot_cells(cds,
+           group_cells_by="partition",
+           color_cells_by="cluster_ext_type")
+```
+
+Garnett 分类器可以应用于训练它们的数据集以外的数据集。我们强烈建议您分享您的 Garnett 文件并将它们包含在您的论文中，以便其他人可以使用它们。
+
+作为撰写有关 Garnett 的论文的一部分，我们训练了一个 Garnett 模型以根据 L2 数据对秀丽隐杆线虫细胞进行分类。您可以通过先下载然后将其传递给 `classify_cells()` 函数来使用它对细胞进行分类：
+
+```{r}
+library(org.Ce.eg.db)
+ceWhole <- readRDS(url("https://cole-trapnell-lab.github.io/garnett/classifiers/ceWhole_20191017.RDS"))
+cds <- classify_cells(cds, ceWhole,
+                      db = org.Ce.eg.db,
+                      cluster_extend = TRUE,
+                      cds_gene_id_type = "ENSEMBL")
+```
+
+
