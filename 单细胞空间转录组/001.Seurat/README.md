@@ -1,12 +1,24 @@
-# Seurat Tutorial
+---
+title: Seurat：R toolkit for single cell genomics
+date: 2023-01-31 16:57:11
+permalink: /pages/d207e7/
+categories:
+  - 生信学习
+tags:
+  - 生信工具
+---
+
+![SEURAT](https://satijalab.org/seurat/articles/assets/seurat_banner.jpg)
+
+<!-- more -->
 
 ## 作者介绍
 
-**通讯作者：**
-
-<img src="https://as.nyu.edu/content/dam/nyu-as/faculty/images/satija-rahul-photo.jpg" width="200"/>\
-**Rahul Satija (Oxford University)** \
-<rsatija@nygenome.org>
+| Rahul Satija |
+|:-------------:|
+| <img src="https://as.nyu.edu/content/dam/nyu-as/faculty/images/satija-rahul-photo.jpg" width="200"/> |
+| Oxford University |
+| <rsatija@nygenome.org> |
 
 
 ## Seurat 介绍
@@ -16,10 +28,14 @@ Seurat 是一个 R 包，专为 single-cell RNA-seq 数据的质控、分析和�
 Seurat 的所有方法都强调清晰、有吸引力和可解释的可视化效果，旨在方便干实验室和湿实验室研究人员使用。
 
 Seurat 发表的相关文献:
+- [Hao, et al., bioRxiv 2022](https://doi.org/10.1101/2022.02.24.481684) [Seurat V5]
 - [Hao*, Hao*, et al., Cell 2021](https://doi.org/10.1016/j.cell.2021.04.048) [Seurat V4]
 - [Stuart*, Butler*, et al., Cell 2019](https://www.cell.com/cell/fulltext/S0092-8674(19)30559-8) [Seurat V3]
 - [Butler* et al., Nat Biotechnol 2018](https://doi.org/10.1038/nbt.4096) [Seurat V2]
 - [Satija*, Farrell*, et al., Nat Biotechnol 2015](https://doi.org/10.1038/nbt.3192) [Seurat V1]
+
+GitHub: <https://github.com/satijalab/seurat>  
+官方文档：<https://satijalab.org/seurat/index.html>  
 
 
 ## Seurat Tutorial
@@ -33,7 +49,7 @@ Seurat 为有兴趣分析多模式单细胞数据集（例如来自 CITE-seq 或
 #### 1.1 Seurat - Guided Clustering Tutorial
 Seurat 的基本概述，包括对常见分析工作流程的介绍。 \
 官网教程：<https://satijalab.org/seurat/articles/pbmc3k_tutorial.html> \
-中文教程：<http://htmlpreview.github.io/?https://github.com/zhenghu159/learn/blob/main/R/11.Seurat/Seurat%20-%20Guided%20Clustering%20Tutorial.nb.html>
+中文教程：<http://htmlpreview.github.io/?https://github.com/zhenghu159/Bioinformatics-Tools/blob/main/%E5%8D%95%E7%BB%86%E8%83%9E%E7%A9%BA%E9%97%B4%E8%BD%AC%E5%BD%95%E7%BB%84/001.Seurat/Seurat%20-%20Guided%20Clustering%20Tutorial.nb.html>
 
 
 
@@ -44,19 +60,19 @@ Seurat 的基本概述，包括对常见分析工作流程的介绍。 \
 #### 2.1 Introduction to scRNA-seq integration
 介绍如何整合 scRNA-seq 数据集以识别和比较实验中的共享细胞类型。\
 官网教程：<https://satijalab.org/seurat/articles/integration_introduction.html> \
-中文教程：<http://htmlpreview.github.io/?https://github.com/zhenghu159/learn/blob/main/R/11.Seurat/Introduction%20to%20scRNA-seq%20integration.nb.html>
+中文教程：<http://htmlpreview.github.io/?https://github.com/zhenghu159/Bioinformatics-Tools/blob/main/%E5%8D%95%E7%BB%86%E8%83%9E%E7%A9%BA%E9%97%B4%E8%BD%AC%E5%BD%95%E7%BB%84/001.Seurat/Introduction%20to%20scRNA-seq%20integration.nb.html>
 
 #### 2.2 Mapping and annotating query datasets
 学习如何将 query scRNA-seq dataset 映射到 reference dataset 上，以便自动化注释和可视化 query cells。\
 官网教程：<https://satijalab.org/seurat/articles/integration_mapping.html> \
-中文教程：<http://htmlpreview.github.io/?https://github.com/zhenghu159/learn/blob/main/R/11.Seurat/Mapping%20and%20annotating%20query%20datasets.nb.html>
+中文教程：<http://htmlpreview.github.io/?https://github.com/zhenghu159/Bioinformatics-Tools/blob/main/%E5%8D%95%E7%BB%86%E8%83%9E%E7%A9%BA%E9%97%B4%E8%BD%AC%E5%BD%95%E7%BB%84/001.Seurat/Mapping%20and%20annotating%20query%20datasets.nb.html>
 
 #### 2.3 Fast integration using reciprocal PCA (RPCA)
 使用 reciprocal PCA (RPCA) 工作流程识别 anchors，该工作流程执行更快、更保守的整合。 \
 官网教程：<https://satijalab.org/seurat/articles/integration_rpca.html> \
-中文教程：<http://htmlpreview.github.io/?https://github.com/zhenghu159/learn/blob/main/R/11.Seurat/Fast%20integration%20using%20reciprocal%20PCA%20(RPCA).nb.html>
+中文教程：<http://htmlpreview.github.io/?https://github.com/zhenghu159/Bioinformatics-Tools/blob/main/%E5%8D%95%E7%BB%86%E8%83%9E%E7%A9%BA%E9%97%B4%E8%BD%AC%E5%BD%95%E7%BB%84/001.Seurat/Fast%20integration%20using%20reciprocal%20PCA%20(RPCA).nb.html>
 
 #### 2.4 Tips for integrating large datasets
 整合非常大的 scRNA-seq 数据集（包括 >200,000 个细胞）的技巧和示例。 \
 官网教程：<https://satijalab.org/seurat/articles/integration_large_datasets.html> \
-中文教程：<http://htmlpreview.github.io/?https://github.com/zhenghu159/learn/blob/main/R/11.Seurat/Tips%20for%20integrating%20large%20datasets.nb.html>
+中文教程：<http://htmlpreview.github.io/?https://github.com/zhenghu159/Bioinformatics-Tools/blob/main/%E5%8D%95%E7%BB%86%E8%83%9E%E7%A9%BA%E9%97%B4%E8%BD%AC%E5%BD%95%E7%BB%84/001.Seurat/Tips%20for%20integrating%20large%20datasets.nb.html>
