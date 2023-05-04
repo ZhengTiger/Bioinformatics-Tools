@@ -1,0 +1,278 @@
+---
+title: "Network Visualization"
+author: "TigerZ"
+date: "2023-5-4"
+output: 
+  html_notebook: 
+    toc: yes
+    toc_depth: 5
+    number_sections: yes
+---
+
+
+在本教程中，我们演示了使用 hdWGCNA 制作共表达网络的几种可视化方法。在开始本教程之前，请确保您已按照 [hdWGCNA basics](https://smorabit.github.io/hdWGCNA/articles/articles/basics_tutorial.html) 构建了共表达网络。本教程涵盖了 hdWGCNA 中三个主要的网络可视化：
+
+- `ModuleNetworkPlot`，为每个模块可视化一个单独的网络图，显示 kME 排名 top 25 的基因。
+- `HubGeneNetworkPlot`，可视化包含所有模块的网络，每个模块具有给定数量的 hub genes。
+- `ModuleUMAPPlot`，使用 UMAP 降维算法同时可视化共表达中的所有基因。
+
+在我们可视化任何东西之前，我们首先需要加载数据和所需的库。
+
+```{r}
+# single-cell analysis package
+library(Seurat)
+
+# plotting and data science packages
+library(tidyverse)
+library(cowplot)
+library(patchwork)
+
+# co-expression network analysis packages:
+library(WGCNA)
+library(hdWGCNA)
+
+# network analysis & visualization package:
+library(igraph)
+
+# using the cowplot theme for ggplot
+theme_set(theme_cowplot())
+
+# set random seed for reproducibility
+set.seed(12345)
+
+# 导入之前分析的结果
+seurat_obj <- readRDS('hdWGCNA_object.rds')
+```
+
+
+# Individual module network plots
+
+在这里，我们演示使用 `ModuleNetworkPlot` 函数可视化每个模块的 top 25 个 hub genes 的底层网络。默认情况下，此函数创建一个名为“ModuleNetworks”的新文件夹，并为每个模块生成一个.pdf图形。您可以调整此函数的一些参数：
+
+```{r}
+ModuleNetworkPlot(seurat_obj)
+```
+
+在这里，我们可以看到其中一个网络图是什么样子的：
+
+![](https://smorabit.github.io/hdWGCNA/articles/figures/network_vis/INH-M12.png)
+
+在这个网络中，每个节点代表一个基因，每条边代表网络中两个基因之间的共表达关系。这些模块网络图都是根据 hdWGCNA 模块分配表 GetModules(seurat_obj) 中的颜色列进行着色的。kME 排名 top 10 的 hub genes 位于图的中心，而剩余的 15 个 genes 位于外圈。
+
+可选地，可以在此图中更改某些可视化参数：
+
+- `edge.alpha`：确定网络边缘的不透明度
+- `vertex.size`：确定节点的大小
+- `vertex.label.cex`：确定基因标签的字体大小
+
+
+
+# Combined hub gene network plots
+
+在这里，我们将使用 `HubGeneNetworkPlot` 函数制作一个将所有模块组合在一起的网络图。此函数采用用户指定的 top n 个 hub genes 和其他随机选择的基因，并使用 [force-directed graph drawing algorithm](https://en.wikipedia.org/wiki/Force-directed_graph_drawing) 构建联合网络。为了清晰可视化，可以使用 `edge_prop` 参数对网络中的边数进行下采样。在下面的示例中，我们可视化每个模块的 top 3 个 hub genes 和 6 个其他基因。
+
+```{r fig.height=2, fig.width=2, message=FALSE, warning=FALSE}
+# hubgene network
+HubGeneNetworkPlot(
+  seurat_obj,
+  n_hubs = 3, n_other=5,
+  edge_prop = 0.75,
+  mods = 'all'
+)
+```
+
+与前面的网络图一样，每个节点代表一个基因，每条边代表一个共表达关系。在这个网络中，我们用模块的颜色来着色模块内部的边缘，用灰色来着色模块之间的边缘。这个网络中边缘的不透明度按共表达关系的强度进行缩放。可以将其他网络布局设置传递给igraph中的 `layout_with_fr` 函数。用户还可以指定 `return_graph = TRUE` 以返回 igraph 对象，使用自己的自定义代码进行绘制。
+
+```{r}
+g <- HubGeneNetworkPlot(seurat_obj,  return_graph=TRUE)
+```
+
+
+
+# Applying UMAP to co-expression networks
+
+之前我们可视化了共表达网络的一个子集，重点关注 hub genes。在这里，我们使用一种替代方法同时可视化共表达网络中的所有基因。UMAP 是一种适合在二维中可视化高维数据的方法，在这里我们应用 UMAP 将 hdWGCNA 网络嵌入到低维流形中。
+
+hdWGCNA 包括 `RunModuleUMAP` 函数，用于在 hdWGCNA 拓扑重叠矩阵(TOM)上运行 UMAP 算法。对于 UMAP 分析，我们将 TOM 的列子集仅包含每个模块的 kME 排名 top n 的 hub genes，由用户指定。因此，每个基因在 UMAP 空间中的组织取决于该基因与网络 hub 基因的连通性。此函数利用了 `uwot`  R 包中的 UMAP 实现，因此可以在 `RunModuleUMAP` 中包含 `uwot::umap` 函数的其他 UMAP 参数，如 `min_dist`或`spread`。
+
+下面的代码演示了使用 `RunModuleUMAP` 函数，每个模块有 10 个 hub genes：
+
+```{r}
+seurat_obj <- RunModuleUMAP(
+  seurat_obj,
+  n_hubs = 10, # number of hub genes to include for the UMAP embedding
+  n_neighbors=15, # neighbors parameter for UMAP
+  min_dist=0.1 # min distance between points in UMAP space
+)
+```
+
+接下来，我们将使用 ggplot2 对 UMAP 进行简单的可视化：
+
+```{r fig.height=2, fig.width=2, message=FALSE, warning=FALSE}
+# get the hub gene UMAP table from the seurat object
+umap_df <- GetModuleUMAP(seurat_obj)
+
+# plot with ggplot
+ggplot(umap_df, aes(x=UMAP1, y=UMAP2)) +
+  geom_point(
+   color=umap_df$color, # color each point by WGCNA module
+   size=umap_df$kME*2 # size of each point based on intramodular connectivity
+  ) +
+  umap_theme()
+```
+
+在这个图中，每个点代表一个单独的基因。每个点的大小按照基因在其分配模块中的 kME 进行缩放。ggplot2 足以可视化模块 UMAP 中的基因，但在这里我们并没有可视化底层网络。我们可以使用 ModuleUMAPPlot 函数绘制基因及其共表达关系。
+
+```{r}
+ModuleUMAPPlot(
+  seurat_obj,
+  edge.alpha=0.25,
+  sample_edges=TRUE,
+  edge_prop=0.1, # proportion of edges to sample (20% here)
+  label_hubs=2 ,# how many hub genes to plot per module?
+  keep_grey_edges=FALSE
+)
+```
+
+这个图与我们使用 ggplot2 制作的图类似，但我们展示了共表达网络，并在每个模块中标记了 2 个 hub genes。为了清晰可视化，我们使用 `edge_prop` 参数对网络中的边数进行下采样，仅保留 20% 的边。我们还允许用户返回 igraph 对象，以制作自己的自定义图或进行下游网络分析：
+
+```{r}
+g <- ModuleUMAPPlot(seurat_obj,  return_graph=TRUE)
+```
+
+
+
+## Varying the number of hub genes
+
+我们在 UMAP 计算中包含的 hub genes 数量会影响下游可视化。在这里，我们使用 `gganimate` 来可视化比较使用不同数量的 hub genes 计算的 UMAP。
+
+```{r}
+# different label weights to test
+n_hubs <- c(1, 1:10*5)
+
+# loop through different weights
+df <- data.frame()
+for(cur_hubs in n_hubs){
+
+  # make a module UMAP using different label weights
+  seurat_obj <- RunModuleUMAP(
+    seurat_obj,
+    n_hubs = cur_hubs,
+    n_neighbors=15,
+    exclude_grey = TRUE,
+    min_dist=0.1
+  )
+
+  # add to ongoing dataframe
+  cur_df <- GetModuleUMAP(seurat_obj)
+  cur_df$n_hubs <- cur_hubs
+  df <- rbind(df, cur_df)
+}
+
+# ggplot animation library
+library(gganimate)
+
+# plot with ggplot + gganimate
+p <- ggplot(df, aes(x=UMAP1, y=UMAP2)) +
+  geom_point(color=df$color, size=df$kME*2 ) +
+  ggtitle("N hubs: {closest_state}") +
+  transition_states(
+    n_hubs,
+    transition_length = 2,
+    state_length = 2,
+    wrap = TRUE
+  ) +
+  view_follow() +
+  enter_fade() +
+  umap_theme()
+
+animate(p, fps=30, duration=25)
+```
+
+![](https://smorabit.github.io/hdWGCNA/articles/figures/network_vis/hub_umap.gif)
+
+此动画显示了使用不同数量的 hub genes 生成的每个 UMAP。
+
+
+## Supervised UMAP
+
+UMAP 通常用作无监督方法，将数据点投影到降维空间中，但我们也可以向 UMAP 提供已知标签以执行监督分析。原则上，如果算法知道这些分组，UMAP 可以更好地区分嵌入中不同组的数据点。因此，我们允许用户使用 `RunModuleUMAP` 函数运行监督 UMAP，其中每个基因的模块分配作为标签提供。
+
+要执行监督 UMAP 分析，我们设置 `supervised=TRUE`，并且可以选择使用 target_weight 参数来确定标签对最终嵌入的影响程度。接近 0 的 `target_weight` 基于数据结构进行加权，而接近 1 的 `target_weight` 基于标签进行加权。下面的代码演示了如何运行和可视化监督 UMAP：
+
+```{r}
+# run supervised UMAP:
+seurat_obj <- RunModuleUMAP(
+  seurat_obj,
+  n_hubs = 10,
+  n_neighbors=15,
+  min_dist=0.1,
+  supervised=TRUE,
+  target_weight=0.5
+)
+
+# get the hub gene UMAP table from the seurat object
+umap_df <- GetModuleUMAP(seurat_obj)
+
+# plot with ggplot
+ggplot(umap_df, aes(x=UMAP1, y=UMAP2)) +
+  geom_point(
+   color=umap_df$color, # color each point by WGCNA module
+   size=umap_df$kME*2 # size of each point based on intramodular connectivity
+  ) +
+  umap_theme()
+```
+
+为了演示使用不同权重的标签的监督 UMAP 的外观，我们可以为 `target_weight` 的几个值制作不同的 UMAP，并使用 `gganimate` 比较输出。
+
+```{r}
+# different label weights to test
+weights <- 0:10/10
+
+# loop through different weights
+df <- data.frame()
+for(cur_weight in weights){
+
+  # make a module UMAP using different label weights
+  seurat_obj <- RunModuleUMAP(
+    seurat_obj,
+    n_hubs = 10,
+    n_neighbors=15,
+    exclude_grey = TRUE,
+    min_dist=0.3,
+    supervised=TRUE,
+    target_weight = cur_weight
+  )
+
+  # add to ongoing dataframe
+  cur_df <- GetModuleUMAP(seurat_obj)
+  cur_df$weight <- cur_weight
+  df <- rbind(df, cur_df)
+}
+
+# ggplot animation library
+library(gganimate)
+
+# plot with ggplot + gganimate
+p <- ggplot(df, aes(x=UMAP1, y=UMAP2)) +
+  geom_point(color=df$color, size=df$kME*2 ) +
+  ggtitle("Supervised weight: {closest_state}") +
+  transition_states(
+    weight,
+    transition_length = 2,
+    state_length = 2,
+    wrap = TRUE
+  ) +
+  view_follow() +
+  enter_fade() +
+  umap_theme()
+
+animate(p, fps=30, duration=25)
+```
+
+![](https://smorabit.github.io/hdWGCNA/articles/figures/network_vis/umap_animation.gif)
+
+
+
+
+

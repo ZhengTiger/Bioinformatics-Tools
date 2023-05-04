@@ -1,0 +1,206 @@
+---
+title: "Enrichment analysis"
+author: "TigerZ"
+date: "2023-5-4"
+output: 
+  html_notebook: 
+    toc: yes
+    toc_depth: 5
+    number_sections: yes
+---
+
+在本教程中，我们将对 hdWGCNA 模块进行富集测试。我们利用 R 包 `enrichR` 对广泛的策划基因列表进行富集测试。这项分析应该指向我们的 hdWGCNA 模块所涉及的生物学过程。此外，我们进行基因集重叠分析，将 hdWGCNA 模块中的基因与使用 Seurat 的 `FindAllMarkers` 函数识别的标记基因进行比较。
+
+首先，我们需要加载数据和所需的库。
+
+```{r}
+# single-cell analysis package
+library(Seurat)
+
+# plotting and data science packages
+library(tidyverse)
+library(cowplot)
+library(patchwork)
+
+# co-expression network analysis packages:
+library(WGCNA)
+library(hdWGCNA)
+
+# gene enrichment packages
+library(enrichR)
+library(GeneOverlap)
+
+# using the cowplot theme for ggplot
+theme_set(theme_cowplot())
+
+# set random seed for reproducibility
+set.seed(12345)
+
+# load the Zhou et al snRNA-seq dataset
+seurat_obj <- readRDS('hdWGCNA_object.rds')
+```
+
+
+# EnrichR
+
+在本节中，我们讨论如何使用 hdWGCNA 执行 Enrichr 富集测试并如何可视化结果。hdWGCNA 包括 `RunEnrichr` 函数，用于将每个模块中的基因集与 Enrichr 托管的任何基因列表进行比较。您可以在[这里](https://maayanlab.cloud/Enrichr/#libraries)查看不同的 Enrichr 基因列表。我们将富集测试的结果存储在 hdWGCNA 实验中，因此可以轻松检索用于下游分析或导出到外部应用程序（如Excel）。在下面的示例中，我们使用三个 Gene Ontology 数据库执行富集测试：
+
+- GO_Biological_Process_2021
+- GO_Cellular_Component_2021
+- GO_Molecular_Function_2021
+
+```{r}
+# enrichr databases to test
+dbs <- c('GO_Biological_Process_2021','GO_Cellular_Component_2021','GO_Molecular_Function_2021')
+
+# perform enrichment tests
+seurat_obj <- RunEnrichr(
+  seurat_obj,
+  dbs=dbs, # character vector of enrichr databases to test
+  max_genes = 100 # number of genes per module to test
+)
+
+# retrieve the output table
+enrich_df <- GetEnrichrTable(seurat_obj)
+```
+
+Enrichr 测试的输出在这里详细解释，但我们在下面为 `enrich_df` 中的不同列提供简短的解释：
+
+- `Term`：术语的名称（即生物学过程等）。
+- `Overlap`：模块和基因列表之间重叠的基因比例。
+- `P.value`：Fisher精确检验p-value。
+- `Adjusted.P.value`：Fisher精确检验p-value的Benjamini-Hochberg多重检验校正。
+- `Odds.Ratio`：用于量化当前模块中基因列表与当前Term的基因列表之间关联的统计量。
+- `Combined.Score`：p-value的自然对数乘以z-score，其中z-score是期望排名的偏差。
+- `Genes`：分号分隔的重叠基因的基因符号列表。
+- `db`：Enrichr基因列表的名称。
+- `module`：hdWGCNA模块的名称。
+
+
+## Visualize enrichments
+
+现在我们已经完成了富集测试，有几种方法可以将结果可视化。
+
+`EnrichrBarPlot`
+
+hdWGCNA 包括 `EnrichrBarPlot` 函数，用于汇总每个 Enrichr 数据库和每个模块的结果。该函数为每个模块输出一个.pdf图形，其中包含一个条形图，显示前N个富集术语。下面的示例将绘制每个模块中的前10个术语，并将结果输出到名为 `enrichr_plots` 的文件夹中。
+
+```{r}
+# make GO term plots:
+EnrichrBarPlot(
+  seurat_obj,
+  outdir = "enrichr_plots", # name of output directory
+  n_terms = 10, # number of enriched terms to show (sometimes more show if there are ties!!!)
+  plot_size = c(5,7), # width, height of the output .pdfs
+  logscale=TRUE # do you want to show the enrichment as a log scale?
+)
+```
+
+以下条形图是 `EnrichrBarPlot` 输出的一个示例：
+
+![](https://smorabit.github.io/hdWGCNA/articles/figures/enrichment/inh-m7_example.png)
+
+**Interpreting Enrichr results**
+
+每个富集条形图都由模块的唯一颜色着色，并且每个术语都按富集（组合得分）排序。我们鼓励用户仔细检查富集测试的结果，并在得出结论之前使用先前的生物学知识。在这个例子中，我们看到一些对抑制性神经元有意义的术语，例如“抑制性突触组装”和“突触传输，GABA能”。另一方面，我们看到了几个与我们在这个例子中的系统（人脑）完全无关的心脏相关术语。许多基因在同一生物体的不同组织中参与不同的生物学过程，从而导致像这样的富集结果。
+
+`EnrichrDotPlot`
+
+hdWGCNA 包括另一个用于富集结果的可视化函数 `EnrichrDotPlot`，它显示每个模块中一个 Enrichr 数据库的前几个结果。在下面的示例中，我们绘制 `GO_Biological_Process_2021` 数据库中的前一个术语。
+
+```{r fig.height=3, fig.width=3}
+# enrichr dotplot
+EnrichrDotPlot(
+  seurat_obj,
+  mods = "all", # use all modules (this is the default behavior)
+  database = "GO_Biological_Process_2021", # this has to be one of the lists we used above!!!
+  n_terms=1 # number of terms for each module
+)
+```
+
+在这个图中，每个点都由模块的独特颜色着色，每个点的大小根据术语的富集程度进行缩放
+
+
+
+# Marker gene overlap analysis
+
+在本节中，我们讨论如何将 hdWGCNA 模块与簇或细胞类型标记基因进行比较。首先，我们使用 Seurat 函数 `FindAllMarkers` 来识别每种细胞类型中的标记基因，然后我们使用 hdWGCNA 函数 `OverlapModulesDEGs` 来重叠模块和 DEGs。
+
+```{r}
+# compute cell-type marker genes with Seurat:
+Idents(seurat_obj) <- seurat_obj$cell_type
+markers <- Seurat::FindAllMarkers(
+  seurat_obj,
+  only.pos = TRUE,
+  logfc.threshold=1
+)
+
+# compute marker gene overlaps
+overlap_df <- OverlapModulesDEGs(
+  seurat_obj,
+  deg_df = markers,
+  fc_cutoff = 1 # log fold change cutoff for overlap analysis
+)
+```
+
+值得注意的是，`OverlapModulesDEGs` 的结果目前未存储在 hdWGCNA 实验中。这部分是因为这个测试非常快速运行，部分是因为有许多不同的DEGs集合可以与模块进行比较。`overlap_df`包含以下列：
+
+- `module`：hdWGCNA 模块的名称。
+- `group`：RNA-seq 簇/细胞类型/等的名称。
+- `color`：模块的唯一颜色。
+- `odds_ratio`：用于量化当前模块中基因列表与标记基因基因列表之间关联的统计量。
+- `pval`：Fisher 精确检验p-value。
+- `fdr`：Fisher精确检验p-value的假发现率（FDR）多重检验校正。
+- `Significance`：指示重叠显著性水平的字符向量。
+- `Jaccard`：两个基因列表的 Jaccard 指数。
+- `size_intersection`：两个基因列表之间重叠的基因数量。
+
+
+## Visualize overlaps
+
+hdWGCNA 包括两个用于可视化结果的函数 `OverlapModulesDEGs` ，`OverlapDotPlot` 和 `OverlapBarPlot`。
+
+在这里，我们演示使用 `OverlapBarPlot` 可视化 `OverlapModulesDEGs` 的结果。该函数为每种细胞类型创建一个条形图，显示每个模块的一个重叠统计量。
+
+```{r}
+# overlap barplot, produces a plot for each cell type
+plot_list <- OverlapBarPlot(overlap_df)
+
+# stitch plots with patchwork
+wrap_plots(plot_list, ncol=3)
+```
+
+接下来，我们使用 `OverlapDotPlot` 将重叠结果可视化到单个图中。
+
+```{r}
+# plot odds ratio of the overlap as a dot plot
+OverlapDotPlot(
+  overlap_df,
+  plot_var = 'odds_ratio') +
+  ggtitle('Overlap of modules & cell-type markers')
+```
+
+每个点都由 hdWGCNA 模块的唯一颜色着色，点的大小按重叠统计量缩放。我们在点的顶部显示 FDR 显著性水平的星号。
+
+- ’***’: 0 - 0.001
+- ’**’: 0.001 - 0.01
+- ’*’: 0.01 - 0.05
+- ‘+’: 0.05 - 0.1
+- (No symbol): 0.1 - 1.0
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

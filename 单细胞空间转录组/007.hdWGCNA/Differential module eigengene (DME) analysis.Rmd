@@ -1,0 +1,139 @@
+---
+title: "Differential module eigengene (DME) analysis"
+author: "TigerZ"
+date: "2023-5-4"
+output: 
+  html_notebook: 
+    toc: yes
+    toc_depth: 5
+    number_sections: yes
+---
+
+
+在本教程中，我们将演示如何执行差模本征基因（DME）分析，揭示在给定细胞组中上调或下调的模块。
+
+首先，我们加载通过基础教程处理的单细胞数据集和本教程所需的 R 库。
+
+```{r}
+# single-cell analysis package
+library(Seurat)
+
+# plotting and data science packages
+library(tidyverse)
+library(cowplot)
+library(patchwork)
+library(ggrepel)
+
+# co-expression network analysis packages:
+library(WGCNA)
+library(hdWGCNA)
+
+# using the cowplot theme for ggplot
+theme_set(theme_cowplot())
+
+# set random seed for reproducibility
+set.seed(12345)
+
+# 导入之前分析的结果
+seurat_obj <- readRDS('hdWGCNA_object.rds')
+```
+
+
+# DME analysis comparing two groups
+
+在这里，我们讨论如何在两个不同的组之间进行 DME 测试。我们使用 hdWGCNA 函数 `FindDMEs`，它是 Seurat 函数 `FindMarkers` 的一个特例。我们使用 Mann-Whitney  U 检验，也称为 Wilcoxon 检验，来比较两组，但用户可以自行决定使用 `test.use` 参数使用其他检验。
+
+由于教程数据集仅包含对照脑样本，因此我们将使用性别来定义我们的两组。`FindDMEs` 需要 group1 和 group2 的条形码列表。此外，我们只比较 INH 簇中的细胞，因为这是我们进行网络分析的组。
+
+```{r}
+group1 <- seurat_obj@meta.data %>% subset(cell_type == 'INH' & msex == 0) %>% rownames
+group2 <- seurat_obj@meta.data %>% subset(cell_type == 'INH' & msex != 0) %>% rownames
+
+head(group1)
+```
+
+接下来，我们运行 `FindDME` 函数
+
+```{r}
+DMEs <- FindDMEs(
+  seurat_obj,
+  barcodes1 = group1,
+  barcodes2 = group2,
+  test.use='wilcox',
+  wgcna_name='tutorial'
+)
+
+head(DMEs)
+```
+
+我们可以使用 hdWGNCA 函数 `PlotDMEsLollipop` 或 `PlotDMEsVolcano` 来可视化结果。首先，我们制作了一个棒棒糖图来可视化 DME 结果。
+
+```{r}
+PlotDMEsLollipop(
+  seurat_obj, 
+  DMEs, 
+  wgcna_name='tutorial', 
+  pvalue = "p_val_adj"
+)
+```
+
+这个图显示了每个模块的 fold-change，每个点的大小对应于该模块中基因的数量。每个未达到统计学显著性的点上都放置一个“X”。
+
+对于`PlotDMEsLollipop`，如果我们在 DMEs 数据框中有其他自定义列，我们可以使用 `group.by` 参数提供列名和比较参数，用于一个比较组或一组比较组的列表进行绘图。例如：
+
+```{r}
+PlotDMEslollipop(
+  seurat_obj, 
+  DMEs, 
+  wgcna_name='tutorial', 
+  group.by = "Comparisons", 
+  comparison = c("group1_vs_control", "group2_vs_control"),  
+  pvalue = "p_val_adj"
+) 
+```
+
+接下来，我们使用`PlotDMEsVolcano`制作一个火山图，将效果大小和显著性级别一起显示出来。
+
+```{r}
+PlotDMEsVolcano(
+  seurat_obj,
+  DMEs,
+  wgcna_name = 'tutorial'
+)
+```
+
+
+
+# One-versus-all DME analysis
+
+类似于 Seurat 函数 `FindAllMarkers`，当指定一个列来分组细胞时，我们可以使用函数 `FindAllDMEs` 进行一对所有的 DME 测试。在这里，我们将 `group.by` 每个细胞类型进行一对所有测试。
+
+```{r}
+group.by = 'cell_type'
+
+DMEs_all <- FindAllDMEs(
+  seurat_obj,
+  group.by = 'cell_type',
+  wgcna_name = 'tutorial'
+)
+
+head(DMEs_all)
+```
+
+输出看起来类似于 `FindDME`，但有一个称为 `group` 的额外列，其中包含每个细胞分组的信息。
+
+现在我们可以用 `PlotDMEsVolcano` 绘制结果
+
+```{r}
+p <- PlotDMEsVolcano(
+  seurat_obj,
+  DMEs_all,
+  wgcna_name = 'tutorial',
+  plot_labels=FALSE,
+  show_cutoff=FALSE
+)
+
+# facet wrap by each cell type
+p + facet_wrap(~group, ncol=3)
+```
+

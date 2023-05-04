@@ -1,0 +1,126 @@
+---
+title: "Module Trait Correlation"
+author: "TigerZ"
+date: "2023-5-4"
+output: 
+  html_notebook: 
+    toc: yes
+    toc_depth: 5
+    number_sections: yes
+---
+
+
+在本教程中，我们介绍了如何将共表达模块与生物学和技术变量相关联。在开始本教程之前，请确保您已按照 [hdWGCNA basics](https://smorabit.github.io/hdWGCNA/articles/articles/basics_tutorial.html) 构建了共表达网络。
+
+首先加载 snRNA-seq 数据和所需的库：
+
+```{r}
+# single-cell analysis package
+library(Seurat)
+
+# plotting and data science packages
+library(tidyverse)
+library(cowplot)
+library(patchwork)
+
+# co-expression network analysis packages:
+library(WGCNA)
+library(hdWGCNA)
+
+# using the cowplot theme for ggplot
+theme_set(theme_cowplot())
+
+# 导入之前分析的结果
+seurat_ref <- readRDS('hdWGCNA_object.rds')
+```
+
+
+# Compute correlations
+
+在这里，我们使用ModuleTraitCorrelation函数将选定的变量与模块特征基因相关联。该函数计算指定细胞分组的相关性，因为我们可以预期某些变量可能与某些细胞组中的某些模块相关，而在其他细胞组中则不相关。有某些类型的变量可以用于此分析，而其他变量则不应使用。
+
+**Variables that can be used**
+
+- 数值变量
+- 仅有 2 个类别的分类变量，例如“对照组”和“条件组”。
+- 具有顺序关系的分类变量。例如，您可能有一个“disease stage段”类别，按 “healthy”, “stage 1”, “stage 2”, “stage 3” 等顺序排列。在这种情况下，您必须确保该变量存储为 factor，并且级别设置得当。
+
+**Variables that can not be used**
+
+- 具有超过两个类别且不按顺序链接的分类变量。例如，假设您有一个数据集，其中包含三种转基因小鼠品系和一种对照品系。分类变量必须在运行相关性之前转换为数值，因此您最终会得到一个根本没有生物学意义的相关性，因为没有办法按照作为数值变量的意义来排序三种不同的品系。在这种情况下，您应该分别设置对照组和每个品系之间的成对相关性。我们通常有一个“Sample ID”变量，指示哪个细胞来自哪个样本，这是一个不一定按任何特定方式排序的变量，因此像这样的变量不适合 module-trait 相关性分析。
+
+```{r}
+# convert sex to factor
+seurat_obj$msex <- as.factor(seurat_obj$msex)
+
+# convert age_death to numeric
+seurat_obj$age_death <- as.numeric(seurat_obj$age_death)
+
+# list of traits to correlate
+cur_traits <- c('braaksc', 'pmi', 'msex', 'age_death', 'doublet_scores', 'nCount_RNA', 'nFeature_RNA', 'total_counts_mt')
+
+seurat_obj <- ModuleTraitCorrelation(
+  seurat_obj,
+  traits = cur_traits,
+  group.by='cell_type'
+)
+```
+
+对于所使用的任何类别变量，此函数都会打印出一条警告消息，告诉用户类别的排列顺序，以确保其合理。
+
+
+## Inspecting the output
+
+我们可以运行函数 `GetModuleTraitCorrelation` 来检索该函数的输出。
+
+```{r}
+# get the mt-correlation results
+mt_cor <- GetModuleTraitCorrelation(seurat_obj)
+
+names(mt_cor)
+```
+
+`mt_cor` 是一个包含三个项目的列表；`cor`保存相关性结果，`pval`保存相关性p-values，`fdr`保存FDR校正后的p-values。
+
+这些项目中的每一个都是一个列表，其中每个元素都是为执行的每个相关性测试的数据框。
+
+```{r}
+names(mt_cor$cor)
+```
+
+```{r}
+ head(mt_cor$cor$INH[,1:5])
+```
+
+
+
+# Plot Correlation Heatmap
+
+我们可以使用 `PlotModuleTraitCorrelation` 函数绘制相关性分析的结果。该函数为每个相关性矩阵创建一个单独的热图，然后使用 `patchwork` 将它们组合成一个图。
+
+```{r fig.height=4, fig.width=2}
+PlotModuleTraitCorrelation(
+  seurat_obj,
+  label = 'fdr',
+  label_symbol = 'stars',
+  text_size = 2,
+  text_digits = 2,
+  text_color = 'white',
+  high_color = 'yellow',
+  mid_color = 'black',
+  low_color = 'purple',
+  plot_max = 0.2,
+  combine=TRUE
+)
+```
+
+
+
+
+
+
+
+
+
+
+

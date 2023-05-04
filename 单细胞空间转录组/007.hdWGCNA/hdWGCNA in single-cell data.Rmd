@@ -273,5 +273,156 @@ hub_df <- GetHubGenes(seurat_obj, n_hubs = 10)
 head(hub_df)
 ```
 
+到此就结束了 hdWGCNA 的关键分析步骤，所以请记住保存您的输出
+
+```{r}
+saveRDS(seurat_obj, file='hdWGCNA_object.rds')
+```
+
+## Compute hub gene signature scores
+
+基因评分分析是单细胞转录组学中一种流行的方法，用于计算一组基因的整体特征的评分。Seurat 使用 `AddModuleScore` 函数实现了它们自己的基因评分技术，但也有其他替代方法，如`UCell`。hdWGCNA 包括 `ModuleExprScore` 函数，用于计算每个模块的给定数量的基因的基因评分，使用 Seurat 或 UCell 算法。基因评分是从计算模块特征基因来总结模块表达的另一种方式。
+
+```{r}
+# compute gene scoring for the top 25 hub genes by kME for each module
+# with Seurat method
+seurat_obj <- ModuleExprScore(
+  seurat_obj,
+  n_genes = 25,
+  method='Seurat'
+)
+
+# compute gene scoring for the top 25 hub genes by kME for each module
+# with UCell method
+library(UCell)
+seurat_obj <- ModuleExprScore(
+  seurat_obj,
+  n_genes = 25,
+  method='UCell'
+)
+```
+
+
+
+# Basic Visualization
+
+在这里，我们展示了 hdWGCNA 的一些基本可视化能力，并演示如何使用 Seurat 的内置绘图工具来可视化我们的 hdWGCNA 结果。请注意，我们有一个单独的教程来可视化 hdWGCNA 网络。
+
+## Module Feature Plots
+
+`FeaturePlot` 是 Seurat 常用的可视化方法，用于直接在降维上显示感兴趣的特征。hdWGCNA 包括 `ModuleFeaturePlot 函数，用于为每个共表达模块构建 FeaturePlots，由每个模块的唯一分配的颜色着色。
+
+```{r}
+# make a featureplot of hMEs for each module
+plot_list <- ModuleFeaturePlot(
+  seurat_obj,
+  features='hMEs', # plot the hMEs
+  order=TRUE # order so the points with highest hMEs are on top
+)
+
+# stitch together with patchwork
+wrap_plots(plot_list, ncol=6)
+```
+
+我们还可以使用相同的函数绘制 hub gene 显著性得分：
+
+```{r}
+# make a featureplot of hub scores for each module
+plot_list <- ModuleFeaturePlot(
+  seurat_obj,
+  features='scores', # plot the hub gene scores
+  order='shuffle', # order so cells are shuffled
+  ucell = TRUE # depending on Seurat vs UCell for gene scoring
+)
+
+# stitch together with patchwork
+wrap_plots(plot_list, ncol=6)
+```
+
+
+## Module Correlations
+
+hdWGCNA 包括 `ModuleCorrelogram` 函数，用于使用 R 包 corrplot 可视化每个模块之间的相关性，基于它们的 hMEs、MEs 或 hub 基因评分。
+
+```{r}
+# plot module correlagram
+ModuleCorrelogram(seurat_obj)
+```
+
+
+## Seurat plotting functions
+
+Seurat 的基础绘图函数也非常适合可视化 hdWGCNA 的输出。在这里，我们演示使用 `DotPlot` 和 `VlnPlot` 绘制 hMEs。使用 Seurat 的绘图函数可视化 hdWGCNA 数据的关键是将其添加到 Seurat 对象的 `@meta.data` 插槽中：
+
+```{r}
+# get hMEs from seurat object
+MEs <- GetMEs(seurat_obj, harmonized=TRUE)
+mods <- colnames(MEs); mods <- mods[mods != 'grey']
+
+# add hMEs to Seurat meta-data:
+seurat_obj@meta.data <- cbind(seurat_obj@meta.data, MEs)
+```
+
+现在我们可以很容易地使用 Seurat 的 `DotPlot` 函数：
+
+```{r}
+# plot with Seurat's DotPlot function
+p <- DotPlot(seurat_obj, features=mods, group.by = 'cell_type')
+
+# flip the x/y axes, rotate the axis labels, and change color scheme:
+p <- p +
+  coord_flip() +
+  RotatedAxis() +
+  scale_color_gradient2(high='red', mid='grey95', low='blue')
+
+# plot output
+p
+```
+
+下面是我们使用 Seurat 的 VlnPlot 函数的另一个示例：
+
+```{r}
+# Plot INH-M4 hME using Seurat VlnPlot function
+p <- VlnPlot(
+  seurat_obj,
+  features = 'INH-M12',
+  group.by = 'cell_type',
+  pt.size = 0 # don't show actual data points
+)
+
+# add box-and-whisker plots on top:
+p <- p + geom_boxplot(width=.25, fill='white')
+
+# change axis labels and remove legend:
+p <- p + xlab('') + ylab('hME') + NoLegend()
+
+# plot output
+p
+```
+
+
+
+# Next steps
+
+在本教程中，我们介绍了在单细胞转录组学数据中执行共表达网络分析的核心函数。我们鼓励您探索我们的其他教程，以进行这些 hdWGCNA 结果的下游分析。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

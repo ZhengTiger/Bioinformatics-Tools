@@ -1,35 +1,10 @@
-# R
-R/2.scrattch/subsample_PCA
+# 单细胞空间转录组
+单细胞空间转录组/007.hdWGCNA/Zhou_2020.rds
+单细胞空间转录组/007.hdWGCNA/TOM
+单细胞空间转录组/007.hdWGCNA/hdWGCNA_object.rds
+单细胞空间转录组/007.hdWGCNA/ModuleNetworks
+单细胞空间转录组/007.hdWGCNA/enrichr_plots
 
-R/7.hdWGCNA/TOM
-R/7.hdWGCNA/Zhou_2020.rds
-
-R/8.WGCNA/FemaleLiver-Data
-R/8.WGCNA/*.RData
-R/8.WGCNA/geneInfo.csv
-
-R/11.Seurat/hg19
-R/11.Seurat/.Rhistory
-R/11.Seurat/pbmc_tutorial.rds
-R/11.Seurat/pbmc3k_final.rds
-
-
-# python
-python/1.anndata/.ipynb_checkpoints
-python/1.anndata/my_results.h5ad
-
-python/2.poetry/poetry-demo/
-
-python/3.seaborn/.ipynb_checkpoints
-python/3.seaborn/seaborn-data
-
-python/4.skimage/.ipynb_checkpoints
-
-python/7.yCaret/.ipynb_checkpoints
-python/7.PyCaret/data
-python/7.PyCaret/Final RF Model 11Nov2020.pkl
-python/7.PyCaret/logs.log
-python/7.PyCaret/my_best_pipeline.pkl
 
 
 
