@@ -1,0 +1,434 @@
+---
+title: "XGBoost R Tutorial"
+author: TigerZ
+date: 2023-5-10
+output: 
+  html_notebook: 
+    toc: yes
+    number_sections: yes
+---
+
+
+# Introduction
+
+**XGBoost** is short for e**X**treme **G**radient **Boost**ing package.
+
+这一小节的目的是向您展示如何使用 **XGBoost** 来构建模型和进行预测。
+
+它是由 @friedman2000additive 和 @friedman2001greedy 实现的梯度增强框架的高效且可扩展的实现。包括两个解算器：
+
+- linear model;
+- tree learning algorithm.
+
+它支持各种目标函数，包括回归、分类和排名。该软件包具有可扩展性，因此用户也可以轻松定义自己的目标函数。
+
+它已被用于赢得多项 [Kaggle](http://www.kaggle.com/) 比赛。
+
+它有几个特点：
+
+- **速度**：它可以使用 OpenMP 在 Windows 和 Linux 上自动进行并行计算。它通常比经典的 `gbm` 快 10 倍以上。
+- **输入类型**：它需要几种类型的输入数据：
+  - Dense Matrix: R 的稠密矩阵，即 `matrix`；
+  - Sparse Matrix: R 的稀疏矩阵，即 `Matrix::dgCMatrix`；
+  - Data File: 本地数据文件；
+  - xgb.DMatrix: 它自己的类（推荐）。
+- **稀疏性**：它接受 tree booster 和 linear booster 的稀疏输入，并针对稀疏输入进行了优化；
+- **自定义**：支持自定义目标函数和评价函数。
+
+
+
+# Installation
+
+## GitHub version
+
+对于每周更新的版本（强烈推荐），从 GitHub 安装：
+
+```{r}
+install.packages("drat", repos="https://cran.rstudio.com")
+drat:::addRepo("dmlc")
+install.packages("xgboost", repos="http://dmlc.ml/drat/", type = "source")
+```
+
+Windows 用户需要先安装 [Rtools](http://cran.r-project.org/bin/windows/Rtools/)。
+
+## CRAN version
+
+The version 1.7.5.1 is on CRAN, and you can install it by:
+
+```{r}
+install.packages("xgboost",version = "1.7.5.1")
+```
+
+以前可用的版本可以从 CRAN [archive](http://cran.r-project.org/src/contrib/Archive/xgboost)中获得
+
+
+
+# Learning
+
+出于本教程的目的，我们将加载 **XGBoost** 包。
+
+```{r}
+require(xgboost)
+```
+
+## Dataset presentation
+
+在这个例子中，我们的目标是预测蘑菇是否可以吃（就像在许多教程中一样，示例数据与您将在日常生活中使用的相同:-)。
+
+Mushroom data is cited from UCI Machine Learning Repository. @Bache+Lichman:2013.
+
+## Dataset loading
+
+我们将加载包中嵌入的 `agaricus` 数据集，并将它们链接到变量。
+
+数据集已经拆分为：
+
+- `train`: 将用于构建模型；
+- `test`: 将用于评估我们模型的质量。
+
+为什么将数据集分成两部分？
+
+在第一部分中，我们将构建我们的模型。在第二部分中，我们将要对其进行测试并评估其质量。在不划分数据集的情况下，我们将在算法已经看到的数据上测试模型。
+
+```{r}
+data(agaricus.train, package='xgboost')
+data(agaricus.test, package='xgboost')
+train <- agaricus.train
+test <- agaricus.test
+```
+
+在现实世界中，由您来划分训 `train` 和 `test` 数据。执行此操作的方法超出了本文的范围，但是 [`caret`](http://topepo.github.io/caret/data-splitting.html) 包可能会有所帮助。
+
+每个变量都是一个包含两件事的 `list`，`label` 和 `data`：
+
+```{r}
+str(train)
+```
+
+`label` 是我们数据集的结果，这意味着它是我们将尝试预测的 binary classification。
+
+让我们发现数据集的维度。
+
+```{r}
+dim(train$data)
+```
+
+```{r}
+dim(test$data)
+```
+
+这个数据集非常小，不会让 R 包太重，但是 XGBoost 的构建是为了非常有效地管理巨大的数据集。
+
+如下所示，`data` 存储在 `dgCMatrix` 中，它是一个稀疏矩阵，`label` 向量是一个 `numeric` 向量 (`{0,1}`)：
+
+```{r}
+class(train$data)[1]
+```
+
+```{r}
+class(train$label)
+```
+
+
+
+# Basic Training using XGBoost
+
+这一步是我们模型质量过程中最关键的部分。
+
+## Basic training
+
+我们正在使用 `train` 数据。如上所述，`data` 和 `label` 都存储在 `list` 中。
+
+在稀疏矩阵中，包含 0 的单元格不存储在内存中。因此，在主要由 0 组成的数据集中，内存大小会减少。拥有这样的数据集是很常见的。
+
+我们将使用以下参数训练 decision tree model：
+
+- `objective = "binary:logistic"`: 我们将训练一个二元分类模型；
+- `max.depth = 2`: trees 不会很深，因为我们的案例很简单；
+- `nthread = 2`: 我们将要使用的 CPU 线程数；
+- `nrounds = 2`: 将对数据进行两次传递，第二次传递将通过进一步减少基本事实与预测之间的差异来增强模型。
+
+```{r}
+bstSparse <- xgboost(data = train$data, 
+                     label = train$label, 
+                     max.depth = 2, 
+                     eta = 1, 
+                     nthread = 2, 
+                     nrounds = 2, 
+                     objective = "binary:logistic")
+```
+
+您的特征和标签之间的关系越复杂，您需要的遍数就越多。
+
+
+
+# Parameter variations
+
+## Dense matrix
+
+或者，您可以将数据集放在密集矩阵中，即基本 R 矩阵。
+
+```{r}
+bstDense <- xgboost(data = as.matrix(train$data), label = train$label, max.depth = 2, eta = 1, nthread = 2, nrounds = 2, objective = "binary:logistic")
+```
+
+## xgb.DMatrix
+
+XGBoost 提供了一种将它们分组在一个 `xgb.DMatrix` 中的方法。您甚至可以在其中添加其他 meta data。这对于我们稍后会发现的最高级功能很有用。
+
+```{r}
+dtrain <- xgb.DMatrix(data = train$data, label = train$label)
+bstDMatrix <- xgboost(data = dtrain, max.depth = 2, eta = 1, nthread = 2, nrounds = 2, objective = "binary:logistic")
+```
+
+## Verbose option
+
+XGBoost 有几个功能可以帮助您在内部查看学习进度。目的是帮助您设置最佳参数，这是模型质量的关键。
+
+查看训练进度的最简单方法之一是设置 `verbose` 选项（请参阅下文了解更高级的技术）。
+
+```{r}
+# verbose = 0, no message
+bst <- xgboost(data = dtrain, max.depth = 2, eta = 1, nthread = 2, nrounds = 2, objective = "binary:logistic", verbose = 0)
+```
+
+```{r}
+# verbose = 1, print evaluation metric
+bst <- xgboost(data = dtrain, max.depth = 2, eta = 1, nthread = 2, nrounds = 2, objective = "binary:logistic", verbose = 1)
+```
+
+```{r}
+# verbose = 2, also print information about tree
+bst <- xgboost(data = dtrain, max.depth = 2, eta = 1, nthread = 2, nrounds = 2, objective = "binary:logistic", verbose = 2)
+```
+
+
+
+# Basic prediction using XGBoost
+
+## Perform the prediction
+
+我们建立的模型的目的是对新数据进行分类。如前所述，我们将在此步骤中使用 `test` 数据集。
+
+```{r}
+pred <- predict(bst, test$data)
+
+# size of the prediction vector
+print(length(pred))
+```
+
+```{r}
+# limit display of predictions to the first 10
+print(head(pred))
+```
+
+这些数字看起来不像 binary classification `{0,1}`。在能够使用这些结果之前，我们需要执行一个简单的转换。
+
+## Transform the regression in a binary classification
+将回归转换为二元分类
+
+XGBoost 唯一做的就是回归。XGBoost 正在使用 `label` 向量来构建其回归模型。
+
+我们如何使用回归模型来执行 binary classification？
+
+如果我们考虑将回归应用于我们的数据的意义，我们得到的数字是数据被分类为 `1` 的概率。因此，我们将设置规则，如果特定数据的概率 `> 0.5`，则观察被分类为 1（否则为 `0`）。
+
+```{r}
+prediction <- as.numeric(pred > 0.5)
+print(head(prediction))
+```
+
+## Measuring model performance
+
+为了衡量模型性能，我们将计算一个简单的指标，即平均误差。
+
+```{r}
+err <- mean(as.numeric(pred > 0.5) != test$label)
+print(paste("test-error=", err))
+```
+
+请注意，该算法在模型构建期间没有看到 `test` 数据。
+
+步骤说明：
+
+1. `as.numeric(pred > 0.5)` 应用我们的规则，即当概率（<=> regression <=> prediction）`> 0.5` 时，观察值被分类为 `1`，否则为 `0`；
+2. `probabilityVectorPreviouslyComputed != test$label` 计算真实数据和计算概率之间的误差向量；
+3. `mean(vectorOfErrors)` 计算平均误差本身。
+
+最重要的是要记住，**要进行分类**，您只需对 `label` 进行回归，然后应用阈值。
+
+Multiclass classification 以类似的方式工作。
+
+这个指标是 0.02 并且非常低：我们的美味蘑菇模型运行良好！
+
+
+
+# Advanced features
+
+下面的大部分功能已经实现，以帮助您通过更好地理解模型的内容来改进模型。
+
+## Dataset preparation
+
+对于以下高级功能，我们需要将数据放在 `xgb.DMatrix` 中，如上所述。
+
+```{r}
+dtrain <- xgb.DMatrix(data = train$data, label=train$label)
+dtest <- xgb.DMatrix(data = test$data, label=test$label)
+```
+
+## Measure learning progress with xgb.train
+使用 xgb.train 衡量学习进度
+
+`xgboost`(simple) 和 `xgb.train`(advanced) 函数都可以训练模型。
+
+`xgb.train` 的一个特殊功能是能够在每一轮之后跟踪学习进度。由于 boosting 的工作方式，有时轮次过多会导致过拟合。您可以将此功能视为交叉验证方法的近亲。以下技术将帮助您避免过拟合或优化学习时间以尽快停止它。
+
+衡量模型学习进度的一种方法是向 XGBoost 提供第二个已经分类的数据集。因此它可以在第一个数据集上学习并在第二个数据集上测试它的模型。在学习过程中的每一轮之后都会测量一些指标。
+
+在某种程度上，它类似于我们上面对平均误差所做的。主要区别在于上面是在构建模型之后，现在是在构建过程中我们测量错误。
+
+出于本示例的目的，我们使用 `watchlist` 参数。它是 `xgb.DMatrix` 的列表，每个都标有名称。
+
+```{r}
+watchlist <- list(train=dtrain, test=dtest)
+
+bst <- xgb.train(data=dtrain, max.depth=2, eta=1, nthread = 2, nrounds=2, watchlist=watchlist, objective = "binary:logistic")
+```
+
+XGBoost 在每一轮都计算了上面看到的相同的平均误差指标（我们将 `nrounds` 设置为 2，这就是我们有两条线的原因）。显然，`train-error` 数与训练数据集（算法从中学习的数据集）有关，而`test-error`数与测试数据集有关。
+
+训练和测试错误相关的指标非常相似，在某种程度上，这是有道理的：我们从训练数据集中学到的东西与测试数据集中的观察结果相匹配。
+
+如果您自己的数据集没有这样的结果，您应该考虑如何在训练和测试中划分数据集。可能有什么要解决的。同样，[`caret`](http://topepo.github.io/caret/data-splitting.html)包可能会有所帮助。
+
+为了更好地理解学习进程，您可能希望有一些特定的指标，甚至使用多个评估指标。
+
+```{r}
+bst <- xgb.train(data=dtrain, max.depth=2, eta=1, nthread = 2, nrounds=2, watchlist=watchlist, eval.metric = "error", eval.metric = "logloss", objective = "binary:logistic")
+```
+
+`eval.metric` 允许我们监控每一轮的两个新指标，`logloss` 和 `error`。
+
+## Linear boosting
+
+到目前为止，我们进行的所有学习都是基于 boosting trees。XGBoost 实现了第二种基于 linear boosting 的算法。与前一个命令的唯一区别是 `booster = "gblinear"` 参数（并删除了 `eta` 参数）。
+
+```{r}
+bst <- xgb.train(data=dtrain, booster = "gblinear", nthread = 2, nrounds=2, watchlist=watchlist, eval.metric = "error", eval.metric = "logloss", objective = "binary:logistic")
+```
+
+在这种特定情况下，linear boosting 比基于 boosting trees 的算法获得更好的性能指标。
+
+在简单的情况下，会发生这种情况，因为没有什么比线性算法更适合捕获线性链接了。但是，决策树可以更好地捕捉预测变量和结果之间的非线性联系。因为没有灵丹妙药，我们建议您使用自己的数据集检查这两种算法，以了解使用什么。
+
+
+
+# Manipulating xgb.DMatrix
+
+## Save / Load
+
+与保存模型一样，``xgb.DMatrix` 对象（对数据集和结果进行分组）也可以使用 `xgb.DMatrix.save` 函数保存。
+
+```{r}
+xgb.DMatrix.save(dtrain, "dtrain.buffer")
+```
+
+```{r}
+# to load it in, simply call xgb.DMatrix
+dtrain2 <- xgb.DMatrix("dtrain.buffer")
+```
+
+```{r}
+bst <- xgb.train(data=dtrain2, max.depth=2, eta=1, nthread = 2, nrounds=2, watchlist=watchlist, objective = "binary:logistic")
+```
+
+## Information extraction
+
+可以使用 `getinfo` 函数从 `xgb.DMatrix` 中提取信息。此后我们将提取 'label' 数据。
+
+```{r}
+label = getinfo(dtest, "label")
+pred <- predict(bst, dtest)
+err <- as.numeric(sum(as.integer(pred > 0.5) != label))/length(label)
+print(paste("test-error=", err))
+```
+
+
+
+# View feature importance/influence from the learnt model
+从学习模型中查看特征重要性/影响
+
+特征重要性类似于 R gbm 包的相对影响（rel.inf）。
+
+```{r}
+importance_matrix <- xgb.importance(model = bst)
+print(importance_matrix)
+xgb.plot.importance(importance_matrix = importance_matrix)
+```
+
+## View the trees from a model
+
+您可以使用 `xgb.dump` 将学习的 tree 转储到文本文件中。
+
+```{r}
+xgb.dump(bst, with_stats = TRUE)
+```
+
+您可以使用 `xgb.plot.tree` 从您的模型中绘制树
+
+```{r}
+xgb.plot.tree(model = bst)
+```
+
+如果您提供 `fname` 参数的路径，您可以将树保存到您的硬盘驱动器。
+
+## Save and load models
+
+也许您的数据集很大，并且在其上训练模型需要时间？也许您不喜欢浪费时间一次又一次地重做相同的任务？在这些非常罕见的情况下，您会希望保存模型并在需要时加载它。
+
+XGBoost 实现了此类功能，对您很有帮助。
+
+```{r}
+# save model to binary local file
+xgb.save(bst, "xgboost.model")
+```
+
+如果一切顺利，`xgb.save` 函数应该返回 TRUE，否则会崩溃。
+
+要了解我们保存的模型与原始模型的相同程度，一项有趣的测试是比较这两个预测。
+
+```{r}
+# load binary model to R
+bst2 <- xgb.load("xgboost.model")
+pred2 <- predict(bst2, test$data)
+
+# And now the test
+print(paste("sum(abs(pred2-pred))=", sum(abs(pred2-pred))))
+```
+
+result is `0`? We are good!
+
+在某些非常特殊的情况下，例如当您想从 `caret` 包中试用 XGBoost 时，您会希望将模型保存为 R 二进制向量。请参阅下文如何操作。
+
+```{r}
+# save model to R's raw vector
+rawVec <- xgb.save.raw(bst)
+
+# print class
+print(class(rawVec))
+```
+
+```{r warning=FALSE}
+# load binary model to R
+bst3 <- xgb.load(rawVec)
+pred3 <- predict(bst3, test$data)
+
+# pred3 should be identical to pred
+print(paste("sum(abs(pred3-pred))=", sum(abs(pred3-pred))))
+```
+
+Again `0`? It seems that XGBoost works pretty well!
+
+
+
+

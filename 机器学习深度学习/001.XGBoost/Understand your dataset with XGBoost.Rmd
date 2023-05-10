@@ -1,0 +1,179 @@
+---
+title: "Understand your dataset with XGBoost"
+author: TigerZ
+date: 2023-5-10
+output: 
+  html_notebook: 
+    toc: yes
+    number_sections: yes
+---
+
+
+# Introduction
+
+此小节的目的是向您展示如何使用 XGBoost 更好地发现和理解您自己的数据集。
+
+此小节与预测任何内容无关（请参阅 [XGBoost presentation](https://github.com/dmlc/xgboost/blob/master/R-package/vignettes/xgboostPresentation.Rmd)）。我们将解释如何使用 XGBoost 突出显示数据特征与结果之间的联系。
+
+Package loading:
+
+```{r}
+require(xgboost)
+require(Matrix)
+require(data.table)
+if (!require('vcd')) install.packages('vcd')
+```
+
+VCD 包仅用于其嵌入式数据集之一。
+
+
+
+# Preparation of the dataset
+
+## Numeric VS categorical variables
+
+XGBoost 仅管理 `numeric` 向量。
+
+当你有分类数据时该怎么办？
+
+分类变量具有固定数量的不同值。例如，如果名为 Color 的变量只能具有这三个值（红色、蓝色或绿色）中的一个，则 Color 是一个分类变量。
+
+在 R 中，分类变量称为 `factor`。
+
+在控制台中键入 `?factor` 以获取更多信息。
+
+为了回答上面的问题，我们将把分类变量转换为 `numeric` 变量。
+
+## Conversion from categorical to numeric variables
+从分类变量到数值变量的转换
+
+### Looking at the raw data
+
+在这个小节中，我们将看到如何将具有分类变量的密集 `data.frame`（密集 = 矩阵中有很少的零）转换为数字特征的非常稀疏的矩阵（稀疏 = 矩阵中的很多零）。
+
+我们将要看到的方法通常称为 [one-hot encoding](http://en.wikipedia.org/wiki/One-hot)。
+
+第一步是将 `Arthritis` 数据集加载到内存中，并用 `data.table` 包对其进行包装。
+
+```{r}
+data(Arthritis)
+df <- data.table(Arthritis, keep.rownames = FALSE)
+```
+
+`data.table` 与 R `data.frame` 100% 兼容，但其语法更加一致，并且其对大型数据集的性能是一流的（包括来自 R 的 `dplyr` 和来自 Python 的 `Pandas`）。 XGBoost R 包的某些部分使用 `data.table`。
+
+```{r}
+head(df)
+```
+
+现在我们将检查每一列的格式。
+
+```{r}
+str(df)
+```
+
+2 列具有 `factor` 类型，一列具有 `ordinal` 类型。
+
+`ordinal` 变量：
+
+- 可以采用有限数量的值（如`factor`）；
+- 这些值是有序的（与`factor`不同）。这里这些有序的值是：`Marked > Some > None`
+
+## Creation of new features based on old ones
+
+我们将添加一些新的分类特征，看看它是否有帮助。
+
+### Grouping per 10 years
+
+对于第一个特征，我们通过四舍五入实际年龄来创建年龄组。
+
+请注意，我们将其转换为`factor`，以便算法将这些年龄组视为独立值。
+
+因此，20 岁并不比 60 岁更接近 30 岁。简而言之，在这种转换中，年龄之间的距离消失了。
+
+```{r}
+head(df[,AgeDiscret := as.factor(round(Age/10,0))])
+```
+
+### Random split in two groups
+
+以下是对真实年龄的更严格的简化，将其任意拆分为 30 岁。我没有根据地选择这个值。我们稍后会看到根据任意值简化信息是否是一个好的策略（您可能已经知道它的效果如何……）。
+
+```{r}
+head(df[,AgeCat:= as.factor(ifelse(Age > 30, "Old", "Young"))])
+```
+
+### Risks in adding correlated features
+添加相关特征的风险
+
+这些新特征与 `Age` 特征高度相关，因为它们是该特征的简单转换。
+
+对于许多机器学习算法，使用相关特征并不是一个好主意。它有时可能会使预测不太准确，并且大多数时候几乎无法解释模型。例如，GLM 假设特征是不相关的。
+
+幸运的是，决策树算法（boosted trees）对这些特征非常稳健。因此，我们无需处理这种情况。
+
+## Cleaning data
+
+我们删除了 ID，因为从这个特征中没有什么可学习的（它只会增加一些噪音）。
+
+```{r}
+df[,ID:=NULL]
+```
+
+我们将列出`Treatment`列的不同值：
+
+```{r}
+levels(df[,Treatment])
+```
+
+## One-hot encoding
+
+下一步，我们将把分类数据转换为虚拟变量。这是 [one-hot encoding](http://en.wikipedia.org/wiki/One-hot) 步骤。
+
+目的是将每个分类特征的每个值转换为二元特征 `{0, 1}`。
+
+例如，`Treatment`列将替换为两列：`Placebo` 和 `Treated`。他们每个都是二进制的。因此，在转换前在`Treatment`列中具有值 `Placebo` 的观察值在转换后将在新列 `Placebo` 中具有值 1，在新列 `Treated` 中具有值 0。 `Treatment` 列将在 one-hot 编码期间消失。
+
+`Improved` 列被排除在外，因为它将是我们的标签列，即我们想要预测的列。
+
+```{r}
+sparse_matrix <- sparse.model.matrix(Improved~.-1, data = df)
+head(sparse_matrix)
+```
+
+上面使用的公式 `Improved~.-1` 表示将所有分类特征但列 `Improved` 转换为二进制值。这里的`-1`是去掉第一列全是`1`的（这一列是转换生成的）。有关详细信息，您可以在控制台中键入 `?sparse.model.matrix`。
+
+创建输出`numeric`向量（不是稀疏矩阵）：
+
+```{r}
+output_vector = df[,Improved] == "Marked"
+```
+
+1. set `Y` vector to `0`;
+2. set `Y` to `1` for rows where `Improved == Marked` is `TRUE` ;
+3. return `Y` vector.
+
+
+
+# Build the model
+
+下面的代码很普通。有关详细信息，您可以查看 `xgboost` 函数的文档（或 [XGBoost presentation](https://github.com/dmlc/xgboost/blob/master/R-package/vignettes/xgboostPresentation.Rmd)）。
+
+```{r}
+bst <- xgboost(data = sparse_matrix, label = output_vector, max.depth = 4,
+               eta = 1, nthread = 2, nrounds = 10,objective = "binary:logistic")
+```
+
+您可以看到一些 `train-error: 0.XXXXX` 行后跟一个数字。它减少了。每行显示模型对数据的解释程度。越低越好。
+
+一个太合适的模型可能会过度拟合（这意味着它复制/粘贴了太多过去，并且不能很好地预测未来）。
+
+在这里您可以看到数字一直减少到第 7 行然后增加。
+
+这可能意味着我们过度拟合。为了解决这个问题，我应该将轮数减少到 `nrounds = 4`。我会允许这样的事情，因为我真的不关心这个例子的目的:-)
+
+
+
+
+
+
