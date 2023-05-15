@@ -1,0 +1,89 @@
+---
+title: "Plotting #1: Analysis Plots"
+author: TigerZ
+date: 2023-5-14
+output: 
+  html_notebook: 
+    toc: yes
+    number_sections: yes
+---
+
+# Customizing Plots for Enhanced/Simplified Visualization
+**自定义绘图以增强/简化可视化**
+
+虽然 Seurat 和其他软件包的默认绘图通常非常好，但它们通常在绘图后根据原始输出进行修改。 scCustomize 试图简化这个过程并增强一些默认的可视化效果。
+
+即使是简单的事情，比如向每个绘图添加相同的两个 ggplot2 主题选项，也可以通过将它们包装在一个新函数中来为最终用户简化（并增强可重复性和代码错误）。
+
+在本教程中，我将利用 [Marsh et al., 2022 (Nature Neuroscience)](https://doi.org/10.1038/s41593-022-01022-8) 的小鼠小胶质细胞数据(Figure 1)，称为 `marsh_mouse_micro`。以及人类死后 snRNA-seq 数据(Figure 3)，称为 `marsh_human_pm`。另外还使用了来自 SeuratData 包的 pbmc3k 数据集。
+
+```{r}
+library(tidyverse)
+library(patchwork)
+library(viridis)
+library(Seurat)
+library(scCustomize)
+library(qs)
+
+# Load Marsh et al., 2022 datasets
+marsh_mouse_micro <- qread(file = "assets/marsh_2020_micro.qs")
+marsh_human_pm <- qread(file = "assets/marsh_human_pm.qs")
+
+# Load pbmc dataset
+pbmc <- pbmc3k.SeuratData::pbmc3k.final
+```
+
+我们将在此小节中向 pbmc 数据添加一些随机 meta data 变量以供使用
+
+```{r}
+pbmc$sample_id <- sample(c("sample1", "sample2", "sample3", "sample4", "sample5", "sample6"), size = ncol(pbmc),replace = TRUE)
+pbmc$treatment <- sample(c("Treatment1", "Treatment2", "Treatment3", "Treatment4"), size = ncol(pbmc),replace = TRUE)
+```
+
+
+
+# General Notes
+**一般注意事项**
+
+- Parameter names
+  + Seurat 的绘图函数共享许多参数名称（例如，`split.by`），使用 scCustomize 可以约定参数全局使用（例如，`Seurat=cols:scCustomize=colors_use`）。
+  + Seurat 基础函数中使用最多的许多参数已在 scCustomize 版本中实现为直接 参数，允许在调用函数时轻松完成标签自动完成。
+  + 但是，为了简化函数调用，这并不全面。然而，大多数 scCustomize 绘图函数都包含`…`参数，以允许用户提供原始 Seurat（或其他包）函数的任何参数，该函数正在后台使用。
+- ggplot2/patchwork Modifications
+  + 所有 scCustomize 绘图函数返回 ggplot2 或 patchwork 对象，允许使用 ggplot2/patchwork 语法轻松进行额外的绘图/主题修改。
+- Seurat Function Parameters
+  + 大多数 scCustomize 绘图函数包含 `...` 参数，以允许用户为在后台使用的原始 Seurat 函数提供任何参数。
+
+
+
+# Plotting Highly Variable Genes & PC Loadings
+**绘制高度可变的基因和 PC 载荷**
+
+## Plotting highly variable genes
+
+scCustomize 允许绘制高度可变的基因，并在单个函数中标记所需的点数。`VariableFeaturePlot_scCustom()` 还包含几个用于自定义可视化的附加参数。
+
+```{r}
+# Default scCustomize plot
+VariableFeaturePlot_scCustom(seurat_object = marsh_mouse_micro, num_features = 20)
+# Can remove labels if not desired
+VariableFeaturePlot_scCustom(seurat_object = marsh_mouse_micro, num_features = 20, label = FALSE)
+# Repel labels
+VariableFeaturePlot_scCustom(seurat_object = marsh_mouse_micro, num_features = 20, repel = TRUE)
+# Change the scale of y-axis from linear to log10
+VariableFeaturePlot_scCustom(seurat_object = marsh_mouse_micro, num_features = 20, repel = TRUE,y_axis_log = TRUE)
+```
+
+
+<center>**A.** `VariableFeaturePlot_scCustom` 的默认参数。 **B.** 设置`label = FALSE` **C.** 设置`repel=TRUE` **D.** 设置 `y_axis_log=TRUE` 以对数刻度绘制 y 轴</center>
+
+## Plotting PC heatmaps and loadings.
+
+为了便于评估 PCA 结果，scCustomize 提供了函数 `PC_Plotting()`，它在单个拼凑布局中返回 PC 热图和特征加载图。
+
+```{r}
+PC_Plotting(seurat_object = marsh_mouse_micro, dim_number = 2)
+```
+
+
+

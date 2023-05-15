@@ -1,0 +1,215 @@
+---
+title: "Customized Color Palettes & Themes"
+author: TigerZ
+date: 2023-5-14
+output: 
+  html_notebook: 
+    toc: yes
+    number_sections: yes
+---
+
+# Choosing Color Palettes and Themes
+
+虽然默认的 Seurat 和 ggplot2 图表工作得很好，但它们通常可以通过自定义 color palettes 和 theme 选项来增强。为了简化用户的此过程，scCustomize：
+
+1. 设置在整个包中一致且针对绘图条件定制的默认离散和连续变量。
+2. 包含许多快捷方式或辅助函数，可快速访问经常使用的 color palettes 和 themes。
+
+```{r}
+# Load Packages
+library(tidyverse)
+library(patchwork)
+library(scCustomize)
+library(qs)
+
+# Load Marsh et al., 2022 datasets
+marsh_mouse_micro <- qread(file = "assets/marsh_2020_micro.qs")
+
+# Load PBMC example dataset
+pbmc <- pbmc3k.SeuratData::pbmc3k.final
+```
+
+
+
+# Package Default Palettes
+
+## Plotting Continuous Variables
+
+[viridis package](https://sjmgarnier.github.io/viridis/) 包的 continuous palettes 提高了图表的可读性，并且比一些常用的连续调色板更适合色盲。当绘制连续变量（例如基因表达）时，scCustomize 默认使用 reverse “plasma” palette 调色板。
+
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-4-1.png)
+<center>这些 palettes 为连续调色板提供了更好的对比度。在 scCustomize 中，默认值为 `viridis_plasma_dark_high`</center>
+
+有一个例外，`Plot_Density_Custom()` 和 `Plot_Density_Joint()` 默认使用 “magma” palette。做出这个选择是因为我相信 magma palette 为这些图提供了更好的色阶。
+
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-5-1.png)
+<center>示例对比：**A.**默认`Plot_Density_Custom`使用“magma” palette。**B.**使用‘plasma’ palette</center>
+
+
+## Plotting Discrete Variables
+
+为了使用默认参数提供更好的可视化效果，scCustomize 使用 `scCustomize_Palette()` 函数为具有离散调色板的图设置了一系列默认值。
+
+- 如果只绘制 one identity，则使用：`“dodgerblue”`。
+- 如果只绘制 two identities，则使用：`NavyAndOrange()`。
+- 如果大于 2 但小于或等于 36 个，则使用：`DiscretePalette_scCustomize(num_colors = 36, palette = "polychrome")`
+- 如果超过 36 个将使用 dynamic varibow palette：`DiscretePalette_scCustomize(num_colors = *Number of identities*, palette = "varibow", shuffle_pal = TRUE)`
+
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-6-1.png)
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-6-2.png)
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-6-3.png)
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-6-4.png)
+
+
+
+
+
+
+# Continuous Palettes
+
+scCustomize 有许多快速帮助程序，用于访问 viridis 包中的调色板。有关 viridis 调色板的更多信息。这些可以提供给 scCustomize 中的任何适当的绘图函数或 R 中的任何其他绘图。
+
+- viridis_plasma_dark_high
+- viridis_plasma_light_high
+- viridis_magma_dark_high
+- viridis_magma_light_high
+- viridis_inferno_dark_high
+- viridis_inferno_light_high
+- viridis_dark_high
+- viridis_light_high
+
+```{r}
+p1 <- FeaturePlot_scCustom(seurat_object = pbmc, features = "CD3E")
+p2 <- FeaturePlot_scCustom(seurat_object = pbmc, colors_use = viridis_magma_dark_high, features = "CD3E")
+p3 <- FeaturePlot_scCustom(seurat_object = pbmc, colors_use = viridis_inferno_dark_high, features = "CD3E")
+p4 <- FeaturePlot_scCustom(seurat_object = pbmc, colors_use = viridis_light_high, features = "CD3E")
+```
+
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-8-1.png)
+<center>这些调色板为连续调色板提供了更好的对比度。在 scCustomize 中，默认值为 `viridis_plasma_dark_high`</center>
+
+
+
+
+# Large Discrete Palettes
+
+## DiscretePalette_scCustomize()
+
+函数 `DiscretePalette_scCustomize` 受到 `Seurat::DiscretePalette()` 的启发和修改。大多数调色板都是使用 [paletteer package](https://github.com/EmilHvitfeldt/paletteer) 调用的，无需添加包依赖项即可调用调色板。
+可以指定以下调色板：
+- alphabet (24)
+- alphabet2 (24)
+- glasbey (32)
+- polychrome (36)
+- stepped (24)
+- ditto_seq (40)
+- varibow (Dynamic)
+
+## Palettes can either be saved to global environment as variable or called directly within other functions:
+**调色板可以作为变量保存到全局环境中，也可以直接在其他函数中调用：**
+
+```{r}
+# Save as variable to global environment
+polychrome_pal <- DiscretePalette_scCustomize(num_colors = 36, palette = "polychrome")
+
+# Call within another function
+DimPlot_scCustom(seurat_object = obj_name, colors_use = DiscretePalette_scCustomize(num_colors = 26,palette = "polychrome"))
+```
+
+## The “polychrome” palette is the new default for plots with <36 levels and “varibow” when more than 36 levels
+**“polychrome”调色板是 <36 的默认值，超过 36 时使用“varibow”**
+
+```{r}
+DimPlot_scCustom(seurat_object = pbmc)
+```
+
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-10-1.png)
+
+## Visualize Palettes
+
+要可视化这些或任何其他调色板，您可以使用 `PalettePlot()` 函数。
+
+```{r}
+PalettePlot(pal = DiscretePalette_scCustomize(num_colors = 26, palette = "alphabet"))
+
+PalettePlot(pal = c("color1", "color2", ...)
+```
+
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-12-1.png)
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-12-2.png)
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-12-3.png)
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-12-4.png)
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-12-5.png)
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-12-6.png)
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-12-7.png)
+
+
+
+
+
+## Dynamic Palettes
+
+在离散调色板中提供的“varibow”调色板实际上是一个动态调色板，其颜色将根据提供的 `num_colors` 调整整个彩虹：
+
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-13-1.png)
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-13-2.png)
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-13-3.png)
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-13-4.png)
+
+## Shuffle Palettes
+
+有时根据生成的最终图对离散调色板使用不同的顺序可能会有所帮助（有时对于“varibow”尤其如此）。`DiscretePalette_scCustomize` 具有可选参数，它将随机打乱返回的调色板（请参阅 `shuffle_pal` 和 `seed` 参数以允许可重复的打乱。）
+
+```{r}
+PalettePlot(pal = DiscretePalette_scCustomize(num_colors = 30, palette = "varibow")) + ggtitle("varibow (normal)")
+PalettePlot(pal = DiscretePalette_scCustomize(num_colors = 30, palette = "varibow"), shuffle_pal = TRUE) +
+    ggtitle("varibow (shuffled)")
+```
+
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-15-1.png)
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-15-2.png)
+
+
+
+
+# Small Discrete Palettes
+
+最后，scCustomize 包含一些较短的离散调色板的快捷方式，可用于绘制组、处理、基因型等。
+
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-16-1.png)
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-16-2.png)
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-16-3.png)
+![](https://samuel-marsh.github.io/scCustomize/articles/Color_Palettes_files/figure-html/unnamed-chunk-16-4.png)
+
+
+
+# Themes & Plot Helpers
+
+ggplot2 主题设计非常棒，但也可以通过将常用的后情节主题包装到不太冗长的函数中来简化。
+
+scCustomize 包含一些自定义主题和 ggplot2 帮助器，可简化后期绘图主题/更改。
+
+- `UnRotate_X()` Undo x-axis label rotation
+- `Move_Legend()` Select new location to move legend
+- `Blank_Theme()` Removes all axis labels and axes from plot
+- `theme_ggprism_mod()` Modified version of ggprism::theme_prism()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
