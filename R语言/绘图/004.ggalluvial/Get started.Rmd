@@ -1,0 +1,216 @@
+---
+title: "Alluvial Plots in ggplot2"
+author: TigerZ
+date: 2023-5-24
+output: 
+  html_notebook: 
+    toc: yes
+    number_sections: yes
+---
+
+```{r}
+library(ggalluvial)
+```
+
+
+{ggalluvial} 包是一个 {ggplot2} 扩展，用于在 {[tidyverse](https://github.com/tidyverse)} 框架中生成 alluvial plots。设计和功能最初受到 {[alluvial](https://github.com/mbojan/alluvial)} 包的启发，并从许多用户的反馈中受益。
+
+本教程：
+
+- 定义命名方案和文档中使用的 alluvial plots 的基本组成部分（axis, alluvium, stratum, lode, flow）
+- 描述了 {ggalluvial} 识别的 alluvial 数据结构
+- 说明新的 stats 和 geoms
+- 展示了该主题的一些流行变体以及如何制作它们
+
+与大多数 alluvial 和相关图表不同，{ggalluvial} 生成的图是由数据集和统计转换唯一确定的。[这篇博文](https://corybrunson.github.io/2019/09/13/flow-taxonomy/)中详细介绍了区别。
+
+存在许多其他资源用于在 R 中可视化分类数据，包括几种更基本的绘图类型，当数据的结构不适合 alluvial plot 时，它们可能更准确地向查看者传达比例。特别是，查看 Michael Friendly 的 {vcd} 和 {[vcdExtra](https://friendly.github.io/vcdExtra/)} 包以获得各种统计动机的分类数据可视化技术，Hadley Wickham 的 {[productplots](https://github.com/hadley/productplots)} 包和 Haley Jeppson 和 Heike Hofmann 的 {[ggmosaic](https://cran.r-project.org/package=ggmosaic/vignettes/ggmosaic.html)} 包用于产品或 mosaic plots，以及 Nicholas Hamilton 的 {[ggtern](http://www.ggtern.com/)} 包。其他相关包如下所述。
+
+
+
+# Alluvial plots
+
+这是一个典型的 alluvial plot：
+
+![](http://corybrunson.github.io/ggalluvial/articles/ggalluvial_files/figure-html/example%20alluvial%20plot%20using%20Titanic%20dataset-1.png)
+
+下一节将详细介绍此图像的元素如何编码有关基础数据集的信息。现在，我们使用图像作为参考点来定义典型 alluvial plot 的以下元素：
+
+- 一个 axis 是一个维度（variable），数据沿着该维度在固定的水平位置垂直排列。上图使用三个分类轴：`Class`、`Sex`、`Age`。
+- 每个 axis 上的 groups 被描述为称为 *strata* 的不透明块。例如，`Class` axis 包含四个 strata：`1st`, `2nd`, `3rd`, and `Crew`。
+- 称为 *alluvia* 的水平 (x-) 条横跨绘图的宽度。在此图中，每个 alluvia 对应于每个 axis 变量的固定值，由其在 axis 上的垂直位置指示，`Survived` 变量由其 fill color 指示。
+- 相邻轴线对之间的 alluvia 分割是 *flows*。
+- alluvia 在 lodes 处与 strata 相交。上图中没有显示 lodes，但可以将它们推断为填充矩形，将 flows 延伸到图两端的 strata 或连接中心层两侧的 flows。
+
+正如下一节中的示例将展示的那样，将这些元素中的哪些纳入 alluvial plot 取决于基础数据的结构方式以及创建者希望 plot 传达的内容。
+
+
+
+# Alluvial data
+
+{ggalluvial} 识别两种格式的“alluvial data”，在以下小节中详细介绍，但它们基本上对应于分类重复测量数据的“wide”和“long”格式。第三种是表格（或 array）形式，常用于存储具有多个分类维度的数据，例如 `Titanic` 和 `UCBAdmissions` 数据集。为了与整洁数据原则和 {ggplot2} 约定保持一致，{ggalluvial} 不接受表格输入；`base::as.data.frame()` 将这样的数组转换为可接受的 data frame。
+
+
+## Alluvia (wide) format
+
+wide 格式反映了 alluvial plot 的视觉排列，但“未扭曲”：每一行对应一组观察值，这些观察值在每个变量上取特定值，并且每个变量都有自己的列。附加列包含每行的数量，例如队列中观察单位的数量，可用于控制 strata 的高度。基本上，wide 格式由一行一个 alluvium 组成。这是基本函数 `as.data.frame()` 将频率表转换成的格式，例如 3 维 `UCBAdmissions` 数据集：
+
+```{r}
+head(as.data.frame(UCBAdmissions), n = 12)
+```
+
+```{r}
+is_alluvia_form(as.data.frame(UCBAdmissions), axes = 1:3, silent = TRUE)
+```
+
+此格式继承自 {ggalluvial} 的第一个版本，它在 {alluvial} 中使用后对其进行建模：用户声明任意数量的 axis 变量，`stat_alluvium()` 和 `stat_stratum()` 以一致的方式识别和处理：
+
+```{r}
+ggplot(as.data.frame(UCBAdmissions),
+       aes(y = Freq, axis1 = Gender, axis2 = Dept)) +
+  geom_alluvium(aes(fill = Admit), width = 1/12) +
+  geom_stratum(width = 1/12, fill = "black", color = "grey") +
+  geom_label(stat = "stratum", aes(label = after_stat(stratum))) +
+  scale_x_discrete(limits = c("Gender", "Dept"), expand = c(.05, .05)) +
+  scale_fill_brewer(type = "qual", palette = "Set1") +
+  ggtitle("UC Berkeley admissions and rejections, by sex and department")
+```
+
+这些图的一个重要特征是纵轴的意义：strata 之间没有插入间隙，因此 plot 的总高度反映了观测值的累积数量。{ggalluvial} 生成的图符合 {ggplot2} 的“图形语法”原则，这可以防止用户生成“自由浮动”的可视化效果，如[此处](https://developers.google.com/chart/interactive/docs/gallery/sankey)展示的 Sankey 图。{ggalluvial} 参数和本机 {ggplot2} 功能也可以生成[平行集图](https://eagereyes.org/parallel-sets)，此处使用 `HairEyeColor` 数据集进行说明：
+
+```{r}
+as.data.frame(HairEyeColor)
+```
+
+
+```{r}
+ggplot(as.data.frame(HairEyeColor),
+       aes(y = Freq,
+           axis1 = Hair, axis2 = Eye, axis3 = Sex)) +
+  geom_alluvium(aes(fill = Eye),
+                width = 1/8, knot.pos = 0, reverse = FALSE) +
+  scale_fill_manual(values = c(Brown = "#70493D", Hazel = "#E2AC76",
+                               Green = "#3F752B", Blue = "#81B0E4")) +
+  guides(fill = "none") +
+  geom_stratum(alpha = .25, width = 1/8, reverse = FALSE) +
+  geom_text(stat = "stratum", aes(label = after_stat(stratum)),
+            reverse = FALSE) +
+  scale_x_continuous(breaks = 1:3, labels = c("Hair", "Eye", "Sex")) +
+  coord_flip() +
+  ggtitle("Eye colors of 592 subjects, by sex and hair color")
+```
+
+（Warning 是由于“Hair”和“Eye”轴具有相同的值“Brown”。）
+
+这种格式和功能对许多应用程序很有用，并将在未来的版本中保留。它们还涉及一些与 {ggplot2} 规范的明显偏差：
+
+- `axis[0-9]*` 位置美学是非标准的：它们不是一组明确的参数，而是基于正则表达式模式的家族；并且至少需要一个，但不需要特定的一个。
+- [`stat_alluvium()`](http://corybrunson.github.io/ggalluvial/reference/stat_alluvium.html) 忽略任何关于 group 美学的参数；相反，`StatAlluvium$compute_panel()` 使用 group 链接对应于相同 alluvium 的内部转换数据集的行。
+- 必须手动更正水平轴（使用 `scale_x_discrete()` 或 `scale_x_continuous()`）以反映标识轴的隐式分类变量。
+
+此外，像 `fill` 这样的 format aesthetics 对于每个 alluvium 来说都是固定的；例如，它们不能根据每个 axis 上的值从一个 axis 更改到另一个 axis。这意味着，虽然它们可以重现平行集的分支树结构，但这种格式不能用于生成具有配色方案的 alluvial plots，例如[此处](https://developers.google.com/chart/interactive/docs/gallery/sankey)的 featured（“控制颜色”），它们在每个 axis 上“重置”。
+
+另请注意，由 `stat_stratum()`（由 `geom_text()` 调用）生成的 `stratum` 变量是在统计转换期间计算的，必须使用 `after_stat()` 作为 [calculated aesthetic](https://corybrunson.github.io/2020/04/17/calculate-aesthetics/) 来恢复。
+
+
+## Lodes (long) format
+
+{ggalluvial} 识别的 long 格式每个 lode 包含一行，可以理解为“gathering”（在已弃用的 {dplyr} 意义上）或“pivoting”（在 Microsoft Excel 或当前 {dplyr} 意义上）的结果将 alluvia 格式的数据集的轴列转换为键值对列，将轴编码为键，将 stratum 编码为值。这种格式需要一个额外的索引列来链接对应于一个共同队列的行，即单个 alluvium 的 lodes：
+
+```{r}
+UCB_lodes <- to_lodes_form(as.data.frame(UCBAdmissions),
+                           axes = 1:3,
+                           id = "Cohort")
+head(UCB_lodes, n = 12)
+```
+
+```{r}
+is_lodes_form(UCB_lodes, key = x, value = stratum, id = Cohort, silent = TRUE)
+```
+
+在 wide (alluvia) 和 long (lodes) 格式之间转换数据的函数包括几个有助于保留辅助信息的参数。有关示例，请参见[`help("alluvial-data")`](http://corybrunson.github.io/ggalluvial/reference/alluvial-data.html)。
+
+相同的 stat 和 geom 可以使用一组不同的位置美学接收这种格式的数据，也特定于 {ggalluvial}：
+
+- `x`，“key”变量，表示该行对应的轴，将沿水平轴排列
+- `stratum`，`x`表示的轴变量取的“value”
+- `alluvium`，链接单个 alluvium 行的索引方案
+
+高度可以因轴而异，允许用户生成[此处](https://imgur.com/gallery/gI5p7)展示的凹凸图。在这些情况下，strata 所包含的信息并不比 alluvia 多，因此通常不绘制。为方便起见，`stat_alluvium()` 和 `stat_flow()` 都将接受 `x` 和 `alluvium` 的参数，即使没有为 `stratum` 提供参数。例如，我们可以按 region 对 `Refugees` 数据集中的 countries 进行分组，以便比较不同规模的难民数量：
+
+```{r}
+data(Refugees, package = "alluvial")
+country_regions <- c(
+  Afghanistan = "Middle East",
+  Burundi = "Central Africa",
+  `Congo DRC` = "Central Africa",
+  Iraq = "Middle East",
+  Myanmar = "Southeast Asia",
+  Palestine = "Middle East",
+  Somalia = "Horn of Africa",
+  Sudan = "Central Africa",
+  Syria = "Middle East",
+  Vietnam = "Southeast Asia"
+)
+Refugees$region <- country_regions[Refugees$country]
+ggplot(data = Refugees,
+       aes(x = year, y = refugees, alluvium = country)) +
+  geom_alluvium(aes(fill = country, colour = country),
+                alpha = .75, decreasing = FALSE) +
+  scale_x_continuous(breaks = seq(2003, 2013, 2)) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = -30, hjust = 0)) +
+  scale_fill_brewer(type = "qual", palette = "Set3") +
+  scale_color_brewer(type = "qual", palette = "Set3") +
+  facet_wrap(~ region, scales = "fixed") +
+  ggtitle("refugee volume by country and region of origin")
+```
+
+该格式允许我们分配沿着同一 alluvium 从一个轴到另一个轴变化的 aesthetics，这对于重复测量数据集很有用。这需要为每个 flow 生成一个单独的图形对象，如在 `geom_flow()` 中实现的那样。下图使用了一组（更改）学生在几个学期的学术课程。由于 `geom_flow()` 默认调用 `stat_flow()`（见下一个示例），我们用 `stat_alluvium()` 覆盖它以跟踪所有学期的每个学生：
+
+```{r}
+data(majors)
+majors$curriculum <- as.factor(majors$curriculum)
+ggplot(majors,
+       aes(x = semester, stratum = curriculum, alluvium = student,
+           fill = curriculum, label = curriculum)) +
+  scale_fill_brewer(type = "qual", palette = "Set2") +
+  geom_flow(stat = "alluvium", lode.guidance = "frontback",
+            color = "darkgray") +
+  geom_stratum() +
+  theme(legend.position = "bottom") +
+  ggtitle("student curricula across several semesters")
+```
+
+stratum heights `y` 未指定，因此每一行都指定了单位高度。此示例演示了 {ggalluvial} 处理缺失数据的一种方式。另一种方法是将参数 `na.rm` 设置为 `TRUE`。缺失数据处理（特别是 strata 的顺序）还取决于 stratum 变量是 character 还是 factor/numeric。
+
+最后，lode 格式让我们可以选择聚合相邻轴之间的 flows，当相邻轴之间的转换最重要时，这可能是合适的。我们可以根据兰德美国生命小组进行的流感疫苗接种调查的数据证明此选项。数据，包括来自三项调查中每一项的一个问题，已按响应概况汇总：每个“subject”（映射到`alluvium`）实际上代表一组对所有三个问题以相同方式回答的主题，以及每个队列的大小（映射到 `y`）记录在“freq”中。
+
+```{r}
+data(vaccinations)
+vaccinations <- transform(vaccinations,
+                          response = factor(response, rev(levels(response))))
+ggplot(vaccinations,
+       aes(x = survey, stratum = response, alluvium = subject,
+           y = freq,
+           fill = response, label = response)) +
+  scale_x_discrete(expand = c(.1, .1)) +
+  geom_flow() +
+  geom_stratum(alpha = .5) +
+  geom_text(stat = "stratum", size = 3) +
+  theme(legend.position = "none") +
+  ggtitle("vaccination survey responses at three points in time")
+```
+
+该图忽略了轴间 flows 之间的任何连续性。这种“memoryless”统计转换产生了一个不那么混乱的图，其中最多一个 flow 从一个轴上的每个 stratum 流到下一个轴上的每个 stratum，但代价是能够在整个图中跟踪每个队列。
+
+
+
+# Appendix
+
+```{r}
+sessioninfo::session_info()
+```
+
+
+
