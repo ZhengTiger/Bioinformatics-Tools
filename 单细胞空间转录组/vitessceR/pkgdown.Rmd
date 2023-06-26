@@ -1,0 +1,38 @@
+---
+title: "Usage with pkgdown"
+author: TigerZ
+date: 2023-6-22
+output: 
+  html_notebook: 
+    toc: yes
+    number_sections: yes
+---
+
+[Pkgdown](https://pkgdown.r-lib.org/) 是一个 R 包，旨在为 R 包构建文档网站。然
+而，它也可以是使用 R 创建静态网站的简单方法。
+
+Vitessce widget 可以嵌入到使用 pkgdown 构建的静态网站中。事
+实上，这个文档网站是用 pkgdown 构建的，两个 remote 数据示例（[Usage with JSON: Remote Example](https://vitessce.github.io/vitessceR/articles/web_only/json_remote.html) and [Usage with OME-TIFF: Remote Example](https://vitessce.github.io/vitessceR/articles/web_only/ome_tiff_remote.html)）都利用了将 R htmlwidgets 渲染到 pkgdown 网站的能力。
+
+要将 Vitessce widget 渲染到 pkgdown article 中，请在代码块顶部设置块选项，以便渲染输出，并在代码块的最后一行执行 widget 函数。
+
+```{r echo = TRUE}
+library(vitessceR)
+
+vc <- VitessceConfig$new("My config")
+
+# configure vitessce here
+
+vc$widget(theme = "light", width = "100%")
+```
+
+请注意，由于 `pkgdown` 站点是静态的，因此 pkgdown 不能用于向 Vitessce 提供数据，因此只能在 pkgdown 站点上使用远程数据集（通过 [dataset$add_file](https://vitessce.github.io/vitessceR/reference/VitessceConfigDataset.html#method-add_file) 方法添加文件）。
+
+上面链接的两个示例的完整代码可以在 GitHub 上浏览：
+
+
+
+
+
+
+

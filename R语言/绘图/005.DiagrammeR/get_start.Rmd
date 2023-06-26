@@ -1,0 +1,525 @@
+---
+title: "Get Start"
+author: "TigerZ"
+date: "2023-6-25"
+output:
+  html_notebook:
+    toc: yes
+    number_sections: yes
+  html_document:
+    toc: yes
+    df_print: paged
+---
+
+```{r}
+library(DiagrammeR)
+```
+
+# Graph Basics
+
+让我们使用 `create_graph()` 创建一个图形对象并向其添加一些 nodes 和 edges。每
+个 node 在创建时都会获得一个新的整数 ID。每
+条 edge 还获得一个从 1 开始的 ID。函
+数之间的管道使整个过程可读且易于理解。
+
+```{r}
+a_graph <-
+  create_graph() %>%
+  add_node() %>%
+  add_node() %>%
+  add_edge(from = 1, to = 2)
+```
+
+![](http://rich-iannone.github.io/DiagrammeR/reference/figures/a_graph.png)
+
+我们可以使用 `delete_edge()` 删除一条 edge。
+
+```{r}
+b_graph <- a_graph %>% delete_edge(from = 1, to = 2)
+```
+
+![](http://rich-iannone.github.io/DiagrammeR/reference/figures/b_graph.png)
+
+我们可以向图中添加一个 node，同时定义图中现有 nodes 的 to/from edges。
+
+```{r}
+c_graph <- b_graph %>% add_node(from = 1, to = 2)
+```
+
+![](http://rich-iannone.github.io/DiagrammeR/reference/figures/c_graph.png)
+
+在控制台中查看 graph object 将提供有关图形的一些基本信息以及有关从何处获取其他信息的一些指示。
+
+```{r}
+c_graph
+```
+
+每当我们向图中添加 node 或 edge 时，我们都可以添加 node 或 edge 的美学或数据属性。这
+些可以是样式属性（e.g., `color`, `shape`）、分组标签（e.g., `type` and `rel`）或可用于计算和显示目的的 data values。大
+多数 node 或 edge 创建函数（取决于它们是创建 edges、nodes、或者两者）都具有参数 node_aes、edge_aes、node_data 和 edge_data。使
+用这些，我们可以调用同名辅助函数（`node_aes()`、`edge_aes()`、`node_data()` 和 `edge_data()`）来专门针对创建的 node 或 edges 并绑定属性数据。使
+用辅助函数的另一个好处（特别是对于 node/edge 美学属性）是，当键入 `node_aes(` 或 `edge_aes(` 并按 TAB 键时，RStudio 可以提供有关属性名称和定义的内联帮助。
+
+以下是添加 node 并设置其 `color`、`fillcolor` 和 `fontcolor` node 美学属性，以及添加 edge 并设置其 `color`、`arrowhead` 和 `tooltip` 美学属性的示例。
+
+```{r}
+d_graph <-
+  c_graph %>%
+  add_node(
+    type = "type_a",
+    node_aes = node_aes(
+      color = "steelblue",
+      fillcolor = "lightblue",
+      fontcolor = "gray35"
+    ),
+    node_data = node_data(
+      value = 2.5
+    )
+  ) %>%
+  add_edge(
+    from = 1, to = 3,
+    rel = "interacted_with",
+    edge_aes = edge_aes(
+      color = "red",
+      arrowhead = "vee",
+      tooltip = "Red Arrow"
+    ),
+    edge_data = edge_data(
+      value = 5.2
+    )
+  )
+```
+
+![](http://rich-iannone.github.io/DiagrammeR/reference/figures/d_graph.png)
+
+创建属性并设置它们的值通常很有用，因为我们可以进一步处理这些属性（例如，改变值，甚至在遍历期间使用它们）。此
+外，我们可以根据数字或分类数据创建美学属性。当
+您想要使用 `render_graph()` 函数显示图表时，这非常重要。
+
+如果在创建关联 nodes 或 edges 时属性值设置不正确，请不要担心。它
+们是为现有 nodes 和 edges 设置属性值的方法。函
+数可用于针对特定 nodes/edges（即，进行选择），其他函数用于设置所选 nodes 或 edges 的属性值。通
+常，这可能是更有效的策略，因为我们可以根据 nodes/edges 的属性（例如，degree, relationships to neighbors，等）来定位 nodes/edges。下
+面是一个例子，我们根据 node 的 value 属性选择一个 node 并修改其颜色节点的美学属性：
+
+```{r}
+e_graph <-
+  d_graph %>%
+  select_nodes(conditions = value == 2.5) %>%
+  set_node_attrs_ws(node_attr = fillcolor, value = "orange") %>%
+  clear_selection()
+```
+
+为了解释一下这一点，我们采用图形对象 `d_graph`，仅选择 node `value` 属性恰好为 `2.5` 的 node。（
+我们现在有一个活跃的 node 选择。）对于选定的 nodes，我们将其 node 属性 `fillcolor` 设置为橙色。然
+后我们用 `clear_selection()` 取消选择。现
+在，如果我们使用 `render_graph()` 查看图表，我们会得到：
+
+![](http://rich-iannone.github.io/DiagrammeR/reference/figures/e_graph.png)
+
+有很多函数允许您选择 nodes（e.g., `select_nodes()`, `select_nodes_by_id()`, `select_last_nodes_created()`）和 edges（e.g., `select_edges()`, `select_edges_by_edge_id()`, `select_last_edges_created()`）。通
+过这些选择，我们可以使用以 `..._ws()` 结尾的函数（with selection）应用更改。如
+图所示，可以使用 `set_node_attrs_ws()` 设置/替换 nodes 属性，但我们也可以改变所选 nodes 的属性 (`mutate_node_attrs_ws()`)、删除所选 nodes (`delete_nodes_ws()`)，甚至使用该选择创建子图 (`create_subgraph_ws()`)。可
+以使用 `invert_selection()` 反转 nodes 或 edges 的选择（其中未选择的 nodes 或 edges 成为激活选择），可以使用 `deselect_nodes()`/`deselect_edges()` 从激活选择中删除某些 nodes/edges，以及任何选择可以而且应该最终用 `clear_selection()` 清除。
+
+我们可以创建一个 graph object 并向其添加 graph primitives，例如 paths, cycles, and trees。
+
+```{r}
+f_graph <-
+  create_graph() %>%
+  add_path(n = 3) %>%
+  add_cycle(n = 4) %>%
+  add_balanced_tree(k = 2, h = 2)
+```
+
+![](http://rich-iannone.github.io/DiagrammeR/reference/figures/f_graph.png)
+
+您可以将一个或多个随机生成的图形添加到图形对象。在
+这里，我们添加一个具有 10 个 nodes 和 15 个 edges 的 directed GNM graph（set_seed 选项使随机图可重现）。
+
+```{r}
+g_graph <-
+  create_graph() %>%
+  add_gnm_graph(
+    n = 15, m = 20,
+    set_seed = 23
+  )
+```
+
+![](http://rich-iannone.github.io/DiagrammeR/reference/figures/g_graph.png)
+
+该图的 undirected 版本可以使用以下命令制作：
+
+```{r}
+h_graph <-
+  create_graph(directed = FALSE) %>%
+  add_gnm_graph(
+    n = 15, m = 20,
+    set_seed = 23
+  )
+```
+
+![](http://rich-iannone.github.io/DiagrammeR/reference/figures/h_graph.png)
+
+我们可以使用 `render_graph()` 查看图表。还
+有多种布局可供选择（e.g., nicely, tree, kk, fr, etc.）。
+
+```{r}
+render_graph(h_graph, layout = "fr")
+```
+
+![](http://rich-iannone.github.io/DiagrammeR/reference/figures/h_graph_2.png)
+
+
+
+# Using Data from Tables to Generate a Graph
+**使用表中的数据生成图**
+
+`DiametermeR` 包包含一些简单的数据集，有助于说明如何使用 table data 创建 graph。`node_list_1` 和 `edge_list_1` 数据集是超级简单的 node 和 edge 数据框，可以组装成图。让我们并排打印它们，看看我们正在处理什么。
+
+```{r}
+node_list_1     edge_list_1
+
+   id label        from to 
+1   1     A     1     1  2 
+2   2     B     2     1  3 
+3   3     C     3     1  4 
+4   4     D     4     1  9 
+5   5     E     5     2  8 
+6   6     F     6     2  7 
+7   7     G     7     2  1 
+8   8     H     8     2 10 
+9   9     I     9     3  1 
+10 10     J     10    3  6 
+                11    3  8
+                12    4  1
+                13    5  7
+                14    6  2
+                15    6  9
+                16    8  1
+                17    9  3
+                18    9 10
+                19   10  1
+```
+
+为了将其形成一个图，我们需要确保添加 nodes 及其 attributes（in this case, just a `label`），并且添加 edges。此外，我们必须将 `from` 和 `to` 定义映射到 node `id`（在其他情况下，我们可能需要将文本标签之间的关系映射到 node 数据框中存储的相同文本属性）。我们可以使用三个函数来生成包含此数据的图表：
+
+1. `create_graph()`
+2. `add_nodes_from_table()`
+3. `add_edges_from_table()`
+
+让我们以逐步的方式展示该过程（同时偶尔查看 graph 的内部 ndf 和 edf），以便我们能够了解实际发生的情况。首先，使用 `create_graph()` 创建 graph object：
+
+```{r}
+# Create the graph object
+i_graph_1 <- create_graph()
+  
+# It will start off as empty
+i_graph_1 %>% is_graph_empty()
+```
+
+使用 `add_nodes_from_table()` 从 table 中添加 nodes：
+
+```{r}
+# Add the nodes to the graph
+i_graph_2 <-
+  i_graph_1 %>%
+  add_nodes_from_table(
+    table = node_list_1,
+    label_col = label
+  )
+```
+
+使用 `get_node_df()` 检查 graph 的内部 node data frame (ndf)：
+
+```{r}
+# View the graph's internal node data frame
+i_graph_2 %>% get_node_df()
+```
+
+该图现在有 10 个 nodes（还没有 edges）。每个 node 都会自动分配一个自动递增的 `id`。
+传入的 `id` 也会自动重命名为 `id_external`，以避免重复的列名，并保留用于映射 edge 定义的列。现在，让我们添加 edges。
+我们需要指定 `edge_list_1` 表中的 `from_col` 是 `from`，`to_col` 是 `to`。
+`from_to_map` 参数需要一个 node attribute 列，`from` 和 `to` 列将映射到该列。
+在本例中它是 `id_external`。
+请注意，虽然 `id` 在此映射中也完美匹配，但可能存在 `id` 与 `id_external` 列不匹配的情况（例如，当存在现有 nodes 时或者当传入表中的 node `id` 值以不同的顺序提供时等。）。
+
+现在，使用 `add_edges_from_table()` 将图 nodes 与另一个数据集的 edges 连接起来：
+
+```{r}
+# Add the edges to the graph
+i_graph_3 <-
+  i_graph_2 %>%
+  add_edges_from_table(
+    table = edge_list_1,
+    from_col = from,
+    to_col = to,
+    from_to_map = id_external
+  )
+```
+
+使用 `get_edge_df()` 检查图的内部 edge data frame (edf)：
+
+```{r}
+# View the edge data frame
+i_graph_3 %>% get_edge_df()
+```
+
+通过在控制台中提供图形对象的名称，我们可以获得图形属性的简洁摘要。
+在这里，我们看到该图有 10 个 nodes 和 19 条 edges：
+
+```{r}
+i_graph_3
+```
+
+包中还包含其他两个类似的数据集（`node_list_2` 和 `edge_list_2`）。
+它们包含扩展属性数据。
+让我们快速浏览一下它们的列名称：
+
+```{r}
+colnames(node_list_2)
+```
+
+```{r}
+colnames(edge_list_2)
+```
+
+由于我们在 `label` 列中具有唯一标签，并且在 `type` 和 `rel` 列中具有分类标签，因此我们可以根据此数据创建属性图。
+像以前一样，我们可以使用 `add_nodes_from_table()` 和 `add_edges_from_table()` 将两个表合并为一个图。
+这次，我们将使用 `drop_node_attrs()` 函数删除自动生成的 `id_external` 节点属性。
+
+```{r}
+j_graph <- 
+  create_graph() %>% 
+  add_nodes_from_table(
+    table = node_list_2,
+    label_col = label,
+    type_col = type
+  ) %>%
+  add_edges_from_table(
+    table = edge_list_2,
+    from_col = from,
+    to_col = to,
+    from_to_map = id_external,
+    rel_col = rel
+  ) %>%
+  drop_node_attrs(node_attr = id_external)
+```
+
+让我们再次查看控制台中的图表摘要。请注意，nodes 和 edges 都存在附加 node attributes（`value_1` 和 `value_2`）：
+
+```{r}
+j_graph
+```
+
+现在，因为我们有 node/edge metadata（nodes 和 edges 的 `value_1` 和 `value_2` 中的分类标签和数值数据），所以我们可以用图做一些有趣的事情。
+首先，让我们使用 `mutate_node_attrs()` 和 `mutate_edge_attrs()` 进行一些变异，并将 `value_1` 和 `value_2` 的总和作为 `value_3` （对于 nodes 和 edges）。
+然后，如果 `value_3` 大于 `10`，则将 nodes 和 edges 着色为 `forestgreen`（否则为 `red``）。
+最后，让我们在渲染图表时显示 nodes 的 `value_3` 的值。
+开始了！
+
+```{r}
+k_graph <-
+  j_graph %>%
+  mutate_node_attrs(value_3 = value_1 + value_2) %>%
+  mutate_edge_attrs(value_3 = value_1 + value_2) %>%
+  select_nodes(conditions = value_3 > 10) %>%
+  set_node_attrs_ws(node_attr = fillcolor, value = "forestgreen") %>%
+  invert_selection() %>%
+  set_node_attrs_ws(node_attr = fillcolor, value = "red") %>%
+  select_edges(conditions = value_3 > 10) %>%
+  set_edge_attrs_ws(edge_attr = color, value = "forestgreen") %>%
+  invert_selection() %>%
+  set_edge_attrs_ws(edge_attr = color, value = "red") %>%
+  clear_selection() %>%
+  set_node_attr_to_display(attr = value_3)
+```
+
+```{r}
+render_graph(k_graph)
+```
+
+![](http://rich-iannone.github.io/DiagrammeR/reference/figures/k_graph.png)
+
+
+
+# A Network Graph Example
+**一个网络图示例**
+
+让我们创建一个与三个软件项目的贡献者相关的属性图。
+该图具有代表 people 和 project 的 nodes。
+属性 `name`、`age`、`join_date`、`email`、`follower_count`、`following_count`、` starred_count` 特定于 `person` nodes，而 `project`、`start_date`、`stars`、`language` 属性适用于 `project` nodes。
+edges 代表 people 和 project 之间的关系。
+
+示例图形文件 `repository.dgr` 位于 **DiagrammeR** 包中的 `extdata/example_graphs_dgr/` 目录中（目前仅适用于 `Github` 版本）。我们可以使用 `open_graph()` 函数将其加载到内存中，其中 `system.file()` 有助于提供文件在包中的位置。
+
+```{r}
+# Load in a the small repository graph
+graph <-
+  open_graph(
+    system.file(
+      "extdata/example_graphs_dgr/repository.dgr",
+      package = "DiagrammeR"
+    )
+  )
+```
+
+我们始终可以使用 `render_graph()` 函数查看此属性图：
+
+```{r}
+render_graph(graph, layout = "kk")
+```
+
+![](http://rich-iannone.github.io/DiagrammeR/reference/figures/graph_example_1.png)
+
+现在图表已设置完毕，您可以使用 *magrittr** 管道创建查询以从图表中获取特定答案。
+
+获取所有贡献者的平均年龄。
+选择 `person` 类型的所有 nodes（not `project`）。该类型的每个 node 都具有 non-`NA` `age` 属性，因此，使用 `get_node_attrs_ws()` 将该属性作为向量获取，然后使用 R 的 `mean()` 函数计算平均值。
+
+```{r}
+graph %>% 
+  select_nodes(conditions = type == "person") %>%
+  get_node_attrs_ws(node_attr = age) %>%
+  mean()
+```
+
+我们可以获得所有项目的提交总数。
+我们知道所有 edges 都包含数字 `commits` 属性，因此，选择所有 edges（`select_edges()` 本身选择图中的所有 edges）。
+之后，获取 `commits` 值的数字向量，然后获取其 `sum()`（对所有项目的所有提交）。
+
+```{r}
+graph %>% 
+  select_edges() %>%
+  get_edge_attrs_ws(edge_attr = commits) %>%
+  sum()
+```
+
+选出 Josh 并获取他作为维护者和贡献者的 commits 总数。
+首先使用 `select_nodes(conditions = name == "Josh")` 选择 Josh nodes。
+在此图中，我们知道所有人都对项目有 edge，并且该 edge 可以是 `contributor` 或 `maintainer` 的关系 (`rel`) 类型。
+我们可以使用 `trav_out_edges()` 将我们的选择从 nodes 迁移到 outbound edges （我们不会提供条件，只是选择 Josh 的所有 outgoing edges）。
+现在我们有 2 条 edges 可供选择。
+使用 `get_edge_attrs_ws()` 获取 `commits` 值向量，然后计算 `sum()`。
+这是 commits 的总数。
+
+```{r}
+graph %>% 
+  select_nodes(conditions = name == "Josh") %>%
+  trav_out_edge() %>%
+  get_edge_attrs_ws(edge_attr = commits) %>%
+  sum()
+```
+
+仅从 maintainer 角色获取 Louisa 的 commits 总数。
+在这种情况下，我们将在 `trav_out_edge()` 中提供一个条件。
+这充当遍历的过滤器，这意味着选择将仅应用于满足条件的那些 edges。
+虽然只有一个值，但我们仍然会在 `get_edge_attrs_ws()` 之后使用 `sum()`（一个很好的做法，因为我们可能不知道向量长度，尤其是在大图中）。
+
+```{r}
+graph %>% 
+  select_nodes(conditions = name == "Louisa") %>%
+  trav_out_edge(conditions = rel == "maintainer") %>%
+  get_edge_attrs_ws(edge_attr = commits) %>%
+  sum()
+```
+
+我们如何做一些更复杂的事情，比如获取图表中 32 岁以上人员的姓名？
+首先，使用 `select_nodes(conditions = type == "person")` 选择所有 `person` nodes。
+然后，进行另一个指定 `age > 32` 的 `select_nodes()` 调用。
+重要的是，设置 `set_op = "intersect"` （为我们提供两个选择的交集）。
+
+现在我们已经开始选择所需的 nodes，我们需要获取这些 nodes 的 `name` 属性的所有值作为字符向量。
+我们使用 `get_node_attrs_ws()` 函数来完成此操作。
+获得该向量后，使用 R 函数 `sort()` 按字母顺序对名称进行排序。
+因为我们得到了一个命名向量，所以我们可以使用 `unname()` 来不显示每个向量分量的名称。
+
+```{r}
+graph %>% 
+  select_nodes(conditions = type == "person") %>%
+  select_nodes(conditions = age > 32, set_op = "intersect") %>%
+  get_node_attrs_ws(node_attr = name) %>%
+  sort() %>%
+  unname()
+```
+
+那个 *supercalc** 项目进展顺利。
+让我们获取所有人对那个最有趣项目的提交总数。
+首先选择该项目的 node 并向后工作。
+使用 `trav_in_edge()` 遍历到通向它的 edges。
+这些 edges 来自提交者，它们都包含带有数值的 `commits` 属性。
+获取 `commits` 向量，然后获取总和（有 `1676` 个 commits）。
+
+```{r}
+graph %>% 
+  select_nodes(conditions = project == "supercalc") %>%
+  trav_in_edge() %>%
+  get_edge_attrs_ws(edge_attr = commits) %>%
+  sum()
+```
+
+Kim 现在是 **stringbuildeR** 项目的贡献者，并对该项目做出了 15 项新的 commits。
+我们可以修改图表来反映这一点。
+
+首先，使用 `add_edge()` 添加一条 edge。
+请注意，在创建新 edge 时，`add_edge()` 通常依赖于 `from` 和 `to` 中的 node ID。
+这几乎总是不方便，因此我们可以使用 node labels（我们知道它们在该图中是唯一的）来组成 edge，设置 `use_labels = TRUE`。
+
+`add_edge()` 中的 `rel` 值设置为 `contributor` - 在属性图中，我们始终为所有 node `type` 和 edge `rel` 属性设置值。
+我们将设置该 edge 的另一个属性（`commits`），首先选择 edge（这是最后一条 edge，所以我们可以使用 `select_last_edges_created()`），然后，使用 `set_edge_attrs_ws()` 并提供 attribute/value 对。
+最后，使用 `clear_selection()` 清除活动选择。
+现在图表已更改，请查看。
+
+```{r}
+graph <- 
+  graph %>%
+  add_edge(
+    from = "Kim",
+    to = "stringbuildeR",
+    rel = "contributor"
+  ) %>%
+  select_last_edges_created() %>%
+  set_edge_attrs_ws(edge_attr = commits, value = 15) %>%
+  clear_selection()
+```
+
+```{r}
+render_graph(graph, layout = "kk")
+```
+
+![](http://rich-iannone.github.io/DiagrammeR/reference/figures/graph_example_2.png)
+
+获取 **randomizer** 和 **supercalc88** 项目的贡献者（但不是维护者）的所有电子邮件地址。
+使用 `trav_in_edge()` 我们只需要 `contributer` edges/commits。
+一旦到达这些 edges，就使用 `trav_out_node()` 无条件跳回到 edges 的来源。
+从这些选定的个人中获取 `email` 值作为排序的字符向量。
+
+```{r}
+graph %>% 
+  select_nodes(
+    conditions = 
+      project == "randomizer" | 
+      project == "supercalc"
+  ) %>%
+  trav_in_edge(conditions = rel == "contributor") %>%
+  trav_out_node() %>%
+  get_node_attrs_ws(node_attr = email) %>%
+  sort() %>%
+  unname()
+```
+
+哪些人参与了多个项目？
+这是一个 node degree 的问题。
+我们知道，人有向外的 edges，也有向内突出的 edges。
+因此，outdegree（number of edges outward）大于 1 的任何人都参与了多个项目。
+在全局范围内，使用 `select_nodes_by_ Degree("outdeg > 1")` 选择具有该条件的 nodes。
+从该 node 选择中获取名称属性值后，我们可以提供名称的排序字符向量。
+
+
+
+
+
+
+
+
+
