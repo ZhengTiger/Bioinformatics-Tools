@@ -515,6 +515,13 @@ graph %>%
 在全局范围内，使用 `select_nodes_by_ Degree("outdeg > 1")` 选择具有该条件的 nodes。
 从该 node 选择中获取名称属性值后，我们可以提供名称的排序字符向量。
 
+```{r}
+graph %>%
+  select_nodes_by_degree(expressions = "outdeg > 1") %>%
+  get_node_attrs_ws(node_attr = name) %>%
+  sort() %>%
+  unname()
+```
 
 
 

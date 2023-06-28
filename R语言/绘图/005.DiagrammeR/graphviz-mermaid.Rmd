@@ -1,0 +1,142 @@
+---
+title: "Graphviz and mermaid in DiagrammeR"
+author: "TigerZ"
+date: "2023-6-27"
+output: 
+  html_notebook: 
+    toc: yes
+    number_sections: yes
+---
+
+
+```{r}
+library(DiagrammeR)
+```
+
+
+
+# Graphviz
+
+**Graphviz** 支持是 DiagrammeR 包的一个组成部分。
+**Graphviz** 由称为 **DOT** 语言的图形描述语言组成，还包含可以处理 **DOT** 语言的各种工具。
+**DOT** 是高度自定义的，它允许您控制线条颜色、箭头形状、节点形状和许多其他布局功能。
+
+
+## DiagrammeR Implementation
+
+对于 **Graphviz** 图，**DiagrammeR** 使用名为 `grViz()` 的处理函数。
+您传递给 `grViz()` 的是 **DOT** 语言中的有效图形规范。
+**DOT** 图形描述可以以字符串、对 **Graphviz** 文件（具有 .gv 文件扩展名）的引用或作为文本连接的形式传递给 `grViz()`。
+
+后面部分中提供的所有代码示例都在 R 脚本中调用 `grViz()` 函数，并以字符串形式传入图形描述。
+重要的是要考虑 R 中的字符串不能包含任何未转义的双引号字符。
+但是，`grViz()` 函数允许在其位置使用单引号字符。
+为了进一步方便起见，当 **DOT** 图形描述作为文件（例如 `dot-graph.gv`）或文本连接提供时，任何一种引用格式都将被接受。
+
+在 **RStudio** 的最新版本中，使用带有 `.gv` 文件扩展名的外部文本文件可以提供语法着色和保存后在 **RStudio** Viewer 窗格中预览的优势（如果选择 `Preview on Save`），或者，通过按 Source 窗格上的 `Preview` 按钮。
+
+
+## Defining a **Graphviz** Graph
+
+**Graphviz** 图规范必须以指令开头，说明是否需要 directed graph (digraph) 或 undirected graph (graph)。
+从语义上讲，这表明从 edge 的一个 node 到另一个 node 是否存在自然方向。
+后面是可选的 graph ID，成对的大括号表示语句列表 (stmt_list) 的主体。
+
+可选地，图也可以被描述为严格的。
+这禁止创建 multi-edges（即，在有向情况下最多可以有一条具有给定 tail node 和 head node 的 edge）。
+对于 undirected graphs，最多可以有一条 edge 连接到相同的两个 nodes。
+使用相同两个 nodes 的后续 edge 语句将使用先前定义的 edge 来识别该 edge，并应用 edge 语句中给定的任何属性。
+
+这是基本结构：
+
+```{dot}
+[strict] (graph | digraph) [ID] '{' stmt_list '}'
+```
+
+
+## Statements
+
+graph 语句（`graph_stmt`）、node 语句（`node_stmt`）和 edge 语句（`edge_stmt`）是 **Graphviz DOT** 语言中最常用的三个语句。
+graph 语句允许为图形的所有组件设置属性。
+node 语句定义并提供图 nodes 的属性。
+edge 语句指定 nodes 之间的 edge 操作，并为 edges 提供属性。
+对于 edge 操作，directed graph 必须使用 edge 运算符 `->` 指定 edge，而 undirected graph 必须使用 `--` 运算符。
+
+这些语句中遵循语句列表。
+因此，对于 node 语句，需要一个 nodes 列表。
+对于 edge 语句，需要一个 edge 列表。
+任何列表项都可以选择具有属性列表 (`attr_list`)，用于修改 node 或 edge 的属性。
+
+注释可以放在声明列表中。
+这些可以使用 `//` 或 `/* */` 结构来标记。
+注释行由 `#` 字符表示。
+语句列表中的多个语句可以用换行符或 `;` 分隔多个语句之间的字符。
+
+这是一个示例，其中可以轻松定义 nodes（在本例中样式为 boxes 和 circles）及其连接：
+
+```{r}
+grViz("
+digraph boxes_and_circles {
+
+  # a 'graph' statement
+  graph [overlap = true, fontsize = 10]
+
+  # several 'node' statements
+  node [shape = box,
+        fontname = Helvetica]
+  A; B; C; D; E; F
+
+  node [shape = circle,
+        fixedsize = true,
+        width = 0.9] // sets as circles
+  1; 2; 3; 4; 5; 6; 7; 8
+
+  # several 'edge' statements
+  A->1 B->2 B->3 B->4 C->A
+  1->D E->A 2->4 1->5 1->F
+  E->6 4->6 5->7 6->7 3->8
+}
+")
+```
+
+
+## Subgraphs and Clusters
+
+Subgraphs 在 **Graphviz** 中扮演三个角色。
+首先，subgraph 可以用来表示图结构，指示某些 nodes 和 edges 应该分组在一起。
+这是 subgraphs 的常见角色，通常指定有关图组件的语义信息。
+它还可以为 edges 提供方便的速记。
+edge 语句允许在 edge 运算符的左侧和右侧都有 subgraph。
+发生这种情况时，将从左侧的每个 node 到右侧的每个 node 创建一条 edge。
+例如:
+
+```{dot}
+A -> {B C}
+```
+
+相当于
+
+```{dot}
+A -> B
+A -> C
+```
+
+在第二个角色中，subgraph 可以提供用于设置属性的上下文。
+例如，subgraph 可以指定蓝色是其中定义的所有 nodes 的默认颜色。
+在图形绘制的上下文中，一个更有趣的例子是
+
+```{dot}
+subgraph {
+  rank = same; A; B; C;
+}
+```
+
+该匿名 subgraph 指定 nodes `A`、`B`、`C` 都应放置在同一等级上。
+
+subgraph 的第三个角色直接涉及到如何通过某些布局类型来布局图。
+如果 subgraph 的名称以 `cluster` 开头，**Graphviz** 会将该 subgraph 标记为特殊的 cluster subgraph。
+如果支持，布局将使属于该 cluster 的 nodes 绘制在一起，并将整个 cluster 图形包含在一个边界矩形内。
+
+
+
+# Graphviz Attributes
