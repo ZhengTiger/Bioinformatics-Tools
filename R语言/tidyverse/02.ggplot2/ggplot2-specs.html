@@ -101,10 +101,24 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 
 </head>
 
-<body class="fullcontent">
+<body>
 
 <div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
-
+<div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+  <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Table of contents</h2>
+   
+  <ul>
+  <li><a href="#colour-and-fill" id="toc-colour-and-fill" class="nav-link active" data-scroll-target="#colour-and-fill">Colour and fill</a></li>
+  <li><a href="#lines" id="toc-lines" class="nav-link" data-scroll-target="#lines">Lines</a>
+  <ul class="collapse">
+  <li><a href="#line-type" id="toc-line-type" class="nav-link" data-scroll-target="#line-type">Line type</a></li>
+  <li><a href="#linewidth" id="toc-linewidth" class="nav-link" data-scroll-target="#linewidth">Linewidth</a></li>
+  <li><a href="#line-endjoin-paramters" id="toc-line-endjoin-paramters" class="nav-link" data-scroll-target="#line-endjoin-paramters">Line end/join paramters</a></li>
+  </ul></li>
+  </ul>
+</nav>
+</div>
 <main class="content" id="quarto-document-content">
 
 <header id="title-block-header" class="quarto-title-block default">
@@ -123,6 +137,12 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
           </div>
   </div>
     
+    <div>
+    <div class="quarto-title-meta-heading">Published</div>
+    <div class="quarto-title-meta-contents">
+      <p class="date">2023.07.04</p>
+    </div>
+  </div>
   
     
   </div>
@@ -130,26 +150,75 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 
 </header>
 
-<section id="quarto" class="level2">
-<h2 class="anchored" data-anchor-id="quarto">Quarto</h2>
-<p>Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <a href="https://quarto.org" class="uri">https://quarto.org</a>.</p>
+<p>此小节总结了网格绘图函数采用的各种格式。大多数信息都分散在 R 文档中。本附录将所有内容集中到一处。</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(ggplot2)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<section id="colour-and-fill" class="level2">
+<h2 class="anchored" data-anchor-id="colour-and-fill">Colour and fill</h2>
+<p>几乎每个 geom 都有 colour 和/或 fill。colour 和 fill 可以通过以下方式指定：</p>
+<ul>
+<li><p>A <strong>name</strong>, e.g., <code>"red"</code>. R 有 657 种内置命名颜色，可以用 <code>colors()</code> 列出。</p></li>
+<li><p>An <strong>rgb specification</strong>，具有 <code>"#RRGGBB"</code> 形式的字符串，其中每对 <code>RR</code>、<code>GG</code>、<code>BB</code> 均由两个十六进制数字组成，给出 <code>00</code> 到 <code>FF</code> 范围内的值。 您可以选择使用 <code>"#RRGGBBAA"</code> 形式使颜色透明。</p></li>
+<li><p>An <strong>NA</strong>，以获得完全透明的颜色。</p></li>
+<li><p><a href="https://github.com/cwickham/munsell">munsell</a> package，Charlotte Wickham 开发，让您可以使用 Albert H. Munsell 设计的系统轻松选择特定颜色。如果您花一点时间学习该系统，它会提供一种指定美观颜色的便捷方法。</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>munsell<span class="sc">::</span><span class="fu">mnsl</span>(<span class="st">"5PB 5/10"</span>)</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="co">#&gt; [1] "#447DBF"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div></li>
+</ul>
 </section>
-<section id="running-code" class="level2">
-<h2 class="anchored" data-anchor-id="running-code">Running Code</h2>
-<p>When you click the <strong>Render</strong> button a document will be generated that includes both content and the output of embedded code. You can embed code like this:</p>
+<section id="lines" class="level2">
+<h2 class="anchored" data-anchor-id="lines">Lines</h2>
+<p>除了 <code>colour</code> 之外，line 的外观还受到 <code>linewidth</code>、<code>linetype</code>、<code>linejoin</code>、<code>lineend</code> 的影响。</p>
+<section id="line-type" class="level3">
+<h3 class="anchored" data-anchor-id="line-type">Line type</h3>
+<p>线条类型可以通过以下方式指定：</p>
+<ul>
+<li><p>An <strong>integer</strong> or <strong>name</strong>: 0 = blank, 1 = solid, 2 = dashed, 3 = dotted, 4 = dotdash, 5 = longdash, 6 = twodash，如下所示：</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="dv">1</span> <span class="sc">+</span> <span class="dv">1</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] 2</code></pre>
+<div class="sourceCode cell-code" id="cb3"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>lty <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">"solid"</span>, <span class="st">"dashed"</span>, <span class="st">"dotted"</span>, <span class="st">"dotdash"</span>, <span class="st">"longdash"</span>, <span class="st">"twodash"</span>)</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>linetypes <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">y =</span> <span class="fu">seq_along</span>(lty),</span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">lty =</span> lty</span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>) </span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(linetypes, <span class="fu">aes</span>(<span class="dv">0</span>, y)) <span class="sc">+</span> </span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_segment</span>(<span class="fu">aes</span>(<span class="at">xend =</span> <span class="dv">5</span>, <span class="at">yend =</span> y, <span class="at">linetype =</span> lty)) <span class="sc">+</span> </span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_linetype_identity</span>() <span class="sc">+</span> </span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_text</span>(<span class="fu">aes</span>(<span class="at">label =</span> lty), <span class="at">hjust =</span> <span class="dv">0</span>, <span class="at">nudge_y =</span> <span class="fl">0.2</span>) <span class="sc">+</span></span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_x_continuous</span>(<span class="cn">NULL</span>, <span class="at">breaks =</span> <span class="cn">NULL</span>) <span class="sc">+</span> </span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_y_reverse</span>(<span class="cn">NULL</span>, <span class="at">breaks =</span> <span class="cn">NULL</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="ggplot2-specs_files/figure-html/unnamed-chunk-3-1.png" class="img-fluid" width="672"></p>
 </div>
-</div>
-<p>You can add options to executable code like this</p>
+</div></li>
+<li><p>on/off 线条伸展的长度。这是通过包含 2、4、6、8 个十六进制数字的字符串来完成的，这些数字给出了连续长度的长度。例如，字符串 <code>"33"</code> 指定三个单位 on，然后三个单位 off，<code>"3313"</code> 指定三个单位 on，然后三个单位 off，然后一个单位 on，然后三个单位 off。</p>
 <div class="cell">
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] 4</code></pre>
+<div class="sourceCode cell-code" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>lty <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">"11"</span>, <span class="st">"18"</span>, <span class="st">"1f"</span>, <span class="st">"81"</span>, <span class="st">"88"</span>, <span class="st">"8f"</span>, <span class="st">"f1"</span>, <span class="st">"f8"</span>, <span class="st">"ff"</span>)</span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>linetypes <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">y =</span> <span class="fu">seq_along</span>(lty),</span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">lty =</span> lty</span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>) </span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(linetypes, <span class="fu">aes</span>(<span class="dv">0</span>, y)) <span class="sc">+</span> </span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_segment</span>(<span class="fu">aes</span>(<span class="at">xend =</span> <span class="dv">5</span>, <span class="at">yend =</span> y, <span class="at">linetype =</span> lty)) <span class="sc">+</span> </span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_linetype_identity</span>() <span class="sc">+</span> </span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_text</span>(<span class="fu">aes</span>(<span class="at">label =</span> lty), <span class="at">hjust =</span> <span class="dv">0</span>, <span class="at">nudge_y =</span> <span class="fl">0.2</span>) <span class="sc">+</span></span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_x_continuous</span>(<span class="cn">NULL</span>, <span class="at">breaks =</span> <span class="cn">NULL</span>) <span class="sc">+</span> </span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_y_reverse</span>(<span class="cn">NULL</span>, <span class="at">breaks =</span> <span class="cn">NULL</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="ggplot2-specs_files/figure-html/unnamed-chunk-4-1.png" class="img-fluid" width="672"></p>
 </div>
 </div>
-<p>The <code>echo: false</code> option disables the printing of code (only output is displayed).</p>
+<p>上述五种标准点划线类型分别对应于 44、13、1343、73、2262。</p></li>
+</ul>
+</section>
+<section id="linewidth" class="level3">
+<h3 class="anchored" data-anchor-id="linewidth">Linewidth</h3>
+<p>由于历史误差，线宽的单位约为 0.75 mm。将其精确设置为 1 mm 会改变大量现有绘图，因此我们陷入了这个错误。</p>
+</section>
+<section id="line-endjoin-paramters" class="level3">
+<h3 class="anchored" data-anchor-id="line-endjoin-paramters">Line end/join paramters</h3>
+</section>
 </section>
 
 </main>

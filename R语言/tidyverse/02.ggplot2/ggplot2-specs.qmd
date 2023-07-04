@@ -1,29 +1,87 @@
 ---
 title: "Aesthetic specifications"
 author: "TigerZ"
+date: 2023.07.04
+date-format: "YYYY.MM.DD"
+toc: true
 format: html
 editor: visual
 ---
 
-## Quarto
-
-Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
-
-## Running Code
-
-When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+此小节总结了网格绘图函数采用的各种格式。大多数信息都分散在 R 文档中。本附录将所有内容集中到一处。
 
 ```{r}
-#| label: simple-addition
+#| warning: false
 
-1 + 1
+library(ggplot2)
 ```
 
-You can add options to executable code like this
+## Colour and fill
 
-```{r}
-#| echo: false
-2 * 2
-```
+几乎每个 geom 都有 colour 和/或 fill。colour 和 fill 可以通过以下方式指定：
 
-The `echo: false` option disables the printing of code (only output is displayed).
+-   A **name**, e.g., `"red"`. R 有 657 种内置命名颜色，可以用 `colors()` 列出。
+
+-   An **rgb specification**，具有 `"#RRGGBB"` 形式的字符串，其中每对 `RR`、`GG`、`BB` 均由两个十六进制数字组成，给出 `00` 到 `FF` 范围内的值。 您可以选择使用 `"#RRGGBBAA"` 形式使颜色透明。
+
+-   An **NA**，以获得完全透明的颜色。
+
+-   [munsell](https://github.com/cwickham/munsell) package，Charlotte Wickham 开发，让您可以使用 Albert H. Munsell 设计的系统轻松选择特定颜色。如果您花一点时间学习该系统，它会提供一种指定美观颜色的便捷方法。
+
+    ```{r}
+    #| eval: false
+
+    munsell::mnsl("5PB 5/10")
+    #> [1] "#447DBF"
+    ```
+
+## Lines
+
+除了 `colour` 之外，line 的外观还受到 `linewidth`、`linetype`、`linejoin`、`lineend` 的影响。
+
+### Line type
+
+线条类型可以通过以下方式指定：
+
+-   An **integer** or **name**: 0 = blank, 1 = solid, 2 = dashed, 3 = dotted, 4 = dotdash, 5 = longdash, 6 = twodash，如下所示：
+
+    ```{r}
+    lty <- c("solid", "dashed", "dotted", "dotdash", "longdash", "twodash")
+    linetypes <- data.frame(
+      y = seq_along(lty),
+      lty = lty
+    ) 
+    ggplot(linetypes, aes(0, y)) + 
+      geom_segment(aes(xend = 5, yend = y, linetype = lty)) + 
+      scale_linetype_identity() + 
+      geom_text(aes(label = lty), hjust = 0, nudge_y = 0.2) +
+      scale_x_continuous(NULL, breaks = NULL) + 
+      scale_y_reverse(NULL, breaks = NULL)
+    ```
+
+-   on/off 线条伸展的长度。这是通过包含 2、4、6、8 个十六进制数字的字符串来完成的，这些数字给出了连续长度的长度。例如，字符串 `"33"` 指定三个单位 on，然后三个单位 off，`"3313"` 指定三个单位 on，然后三个单位 off，然后一个单位 on，然后三个单位 off。
+
+    ```{r}
+    lty <- c("11", "18", "1f", "81", "88", "8f", "f1", "f8", "ff")
+    linetypes <- data.frame(
+      y = seq_along(lty),
+      lty = lty
+    ) 
+    ggplot(linetypes, aes(0, y)) + 
+      geom_segment(aes(xend = 5, yend = y, linetype = lty)) + 
+      scale_linetype_identity() + 
+      geom_text(aes(label = lty), hjust = 0, nudge_y = 0.2) +
+      scale_x_continuous(NULL, breaks = NULL) + 
+      scale_y_reverse(NULL, breaks = NULL)
+    ```
+
+    上述五种标准点划线类型分别对应于 44、13、1343、73、2262。
+
+### Linewidth
+
+由于历史误差，线宽的单位约为 0.75 mm。将其精确设置为 1 mm 会改变大量现有绘图，因此我们陷入了这个错误。
+
+### Line end/join paramters
+
+
+
