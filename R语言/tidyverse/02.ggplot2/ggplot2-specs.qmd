@@ -3,8 +3,11 @@ title: "Aesthetic specifications"
 author: "TigerZ"
 date: 2023.07.04
 date-format: "YYYY.MM.DD"
-toc: true
-format: html
+format: 
+  html:
+    toc: true
+    toc_float: true
+    embed-resources: true
 editor: source
 ---
 
