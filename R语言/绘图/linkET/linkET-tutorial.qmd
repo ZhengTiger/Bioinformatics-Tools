@@ -1,0 +1,162 @@
+---
+title: "linkET tutorial"
+author: "TigerZ"
+date: 2023-07-15
+date-format: YYYY-MM-DD
+format: 
+  html:
+    embed-resources: true
+    toc: true
+    code-fold: show
+    code-tools: true
+---
+
+```{r}
+#| warning: false
+
+library(linkET)
+library(vegan)
+library(dplyr)
+library(ggplot2)
+```
+
+
+## 数据
+
+```{r}
+data("varechem", package = "vegan")
+data("varespec", package = "vegan")
+```
+
+```{r}
+knitr::kable(varechem)
+```
+
+```{r}
+knitr::kable(varespec)
+```
+
+
+
+
+## Mantel test 分析
+
+```{r}
+mantel <- mantel_test(varespec, varechem,
+                      spec_select = list(Spec01 = 1:7,
+                                         Spec02 = 8:18,
+                                         Spec03 = 19:37,
+                                         Spec04 = 38:44)) %>% 
+  mutate(rd = cut(r, breaks = c(-Inf, 0.2, 0.4, Inf),
+                  labels = c("< 0.2", "0.2 - 0.4", ">= 0.4")),
+         pd = cut(p, breaks = c(-Inf, 0.01, 0.05, Inf),
+                  labels = c("< 0.01", "0.01 - 0.05", ">= 0.05")))
+```
+
+```{r}
+#| eval: false
+
+spec_select = list(Spec01 = 1:7,
+                   Spec02 = 8:18,
+                   Spec03 = 19:37,
+                   Spec04 = 38:44)
+```
+
+这语句代表的是，将矩阵 varespec 按照列进行分类，其中 1-7 分为第一类，8-18 分为第二类依次类推。后面可以根据自己的数据进行灵活应用修改，比如说只有四列数据就想分成四类则可以写成：
+
+```{r}
+#| eval: false
+
+spec_select = list(Y1 = 1,
+                   Y2 = 2,
+                   Y3 = 3,
+                   Y4 = 4 )
+```
+
+```{r}
+#| eval: false
+
+mutate(rd = cut(r, breaks = c(-Inf, 0.2, 0.4, Inf),
+                labels = c("< 0.2", "0.2 - 0.4", ">= 0.4")),
+       pd = cut(p, breaks = c(-Inf, 0.01, 0.05, Inf),
+                labels = c("< 0.01", "0.01 - 0.05", ">= 0.05")))
+```
+
+mutate 将 Mantel test 运算结果进行分类，rd 将 r 值分为 c("< 0.2", "0.2 - 0.4", ">= 0.4") 三类，Label 是标签的意思。pd 将 p 值分为 c("< 0.01", "0.01 - 0.05", ">= 0.05") 三类。
+
+
+
+## 绘图
+
+### 热图的绘制
+
+-   correlate(varechem) 计算 varechem 矩阵的相关性矩阵
+-   type = "lower" 保留下三角，"upper" 保留上三角
+-   diag = FALSE 去除对角线，TRUE 保留对角线
+-   geom_square () 热图里以方块进行填充
+
+```{r}
+qcorrplot(correlate(varechem), type = "lower", diag = FALSE) +
+  geom_square()
+```
+
+
+### 绘制 Mantel test
+
+-   geom_couple() 中 colour 是指将上面代码中的 pd 也就是 p 值用连线的颜色表示，size 表示上面代码中的 rd 也就是 R 值用连线的粗细表示。
+-   data=mantel 数据来源为 mantel 对象。
+-   curvature 设置曲线弯曲量的数值，值越大弯曲越大。
+-   node.colour 设置 node 的 colour，前一个颜色为外部 node 颜色，后一个颜色为内部 node 颜色
+-   node.fill 设置 node 的 fill，前一个为外部，后一个为内部
+-   node.size 设置 node 的 size，前一个为外部，后一个为内部
+
+```{r fig.width=8, fig.height=6}
+qcorrplot(correlate(varechem), type = "lower", diag = FALSE) +
+  geom_square() +
+  geom_couple(aes(colour = pd, size = rd), 
+              data = mantel, 
+              curvature = 0.1,
+              node.colour = c("blue","red"),
+              node.fill = c("yellow","grey"),
+              node.size = c(5,2.5))
+```
+
+### 美化图形
+
+-   scale_fill_gradientn() 设置热图的颜色、图例
+-   scale_size_manual() 设置线条的 size
+-   scale_colour_manual() 设置线条的 colour
+-   guides() 设置图例
+
+```{r}
+p <- qcorrplot(correlate(varechem), type = "lower", diag = FALSE) +
+  geom_square() +
+  geom_couple(aes(colour = pd, size = rd), 
+              data = mantel, 
+              curvature = 0.1,
+              node.colour = c("blue","red"),
+              node.fill = c("yellow","grey"),
+              node.size = c(5,2.5)) +
+  scale_fill_gradientn(colours = RColorBrewer::brewer.pal(11, "RdBu"),
+                       limits = c (-1, 1),
+                       breaks = seq (-1,1,0.5)) +
+  scale_size_manual(values = c(0.5, 1, 2)) +
+  scale_colour_manual(values = color_pal(3)) +
+  guides(size = guide_legend(title = "Mantel's r",
+                             override.aes = list(colour = "grey35"), 
+                             order = 2),
+         colour = guide_legend(title = "Mantel's p", 
+                               override.aes = list(size = 3), 
+                               order = 1),
+         fill = guide_colorbar(title = "Pearson's r", order = 3))
+```
+
+```{r fig.width=8, fig.height=6}
+p
+```
+
+
+
+
+
+
