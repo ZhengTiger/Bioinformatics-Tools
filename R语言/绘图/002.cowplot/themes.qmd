@@ -1,0 +1,180 @@
+---
+title: "Themes"
+author: "TigerZ"
+date: "2023-07-18"
+date-format: YYYY-MM-DD
+format:
+  html:
+    embed-resources: true
+    toc: true
+    code-fold: show
+    code-tools: true
+---
+
+cowplot 包提供了一组一致的绘图主题，涵盖了广泛的用例。要了解这些主题的实际应用，请查看 [Fundamentals of Data Visualization](https://serialmentor.com/dataviz) 一书，该书通篇都使用了这些主题。但请注意，书中的图形使用的是 Myriad Pro 字体。由于此字体不是免费提供的，cowplot 主题使用默认的 R 字体，对于大多数图形设备来说，该字体是 Helvetica。所有主题都有一个 `font_family` 参数，您可以使用它来自定义字体供您自己使用。
+
+
+
+## Basic use of plot themes
+
+主题 `theme_half_open()` （或等效的 `theme_cowplot()`）提供了带有两条轴线且没有背景网格的经典绘图外观。该主题适用于大多数类型的图表，但最适合散点图和折线图。
+
+```{r}
+#| warning: false
+
+library(ggplot2)
+library(cowplot)
+
+p <- ggplot(mtcars, aes(disp, mpg)) + geom_point()
+
+p + theme_half_open() # identical to theme_cowplot()
+```
+
+如果您喜欢背景网格，可以通过标准 ggplot2 主题选项添加它。或者，您可以使用 cowplot 函数 `background_grid()`。该函数需要放置在 theme 调用之后，因为 theme 调用会覆盖所有先前的主题设置。
+
+```{r}
+p +
+  theme_half_open() +
+  background_grid() # always place this after the theme
+```
+
+如果您喜欢带有网格且没有轴线的最小外观，请使用 `theme_minimal_grid()`。
+
+```{r}
+p + theme_minimal_grid()
+```
+
+所有主题都可以进一步定制。例如，默认字体大小为 14 point，这适用于 5 到 8 inches 宽的图形。对于较小的数字，您可能需要使用 12 point。另外，我们可以修改 `theme_minimal_grid()` 的网格线的颜色。
+
+```{r}
+p +
+  theme_minimal_grid(
+    font_size = 12,
+    color = "red"
+  )
+
+```
+
+
+
+## Choosing themes in the context of the plot
+
+选择画图主题时，您应该始终注意它如何适合您的特定绘图。例如，如果您正在制作条形图，则 `theme_half_open()` 会生成尴尬的浮动条形图，因为 ggplot2 的自动轴扩展（即 x 轴线不在 y = 0 处）。我认为这样的绘图很丑陋。
+
+```{r}
+p <- ggplot(mtcars, aes(factor(cyl))) +
+  geom_bar(fill = "#56B4E9", alpha = 0.8) +
+  theme_half_open()
+
+stamp_ugly(p)
+```
+
+我们可以通过抑制下端的轴膨胀来解决这个问题。
+
+```{r}
+p <- ggplot(mtcars, aes(factor(cyl))) +
+  geom_bar(fill = "#56B4E9", alpha = 0.8) +
+  scale_y_continuous(
+    # don't expand y scale at the lower end
+    expand = expansion(mult = c(0, 0.05))
+  )
+
+p + theme_half_open()
+```
+
+条形图在背景网格上也往往看起来很尴尬，我建议不要这种使用。
+
+```{r}
+stamp_ugly(
+  p + theme_minimal_grid()
+)
+```
+
+相反，您可以使用 `theme_minimal_hgrid()`，它只绘制水平网格线。
+
+```{r}
+p + theme_minimal_hgrid()
+```
+
+如果您制作带有水平条的翻转条形图，您可能需要垂直网格线，可以使用 `theme_minimal_vgrid()` 获得。
+
+```{r}
+p +
+  coord_flip() +
+  theme_minimal_vgrid()
+```
+
+
+
+## Faceting
+
+分面时需要特别注意。一个主题对于单个绘图来说可能看起来不错，但在分面绘图中效果不佳。举个例子，考虑一下当我们使用 `theme_half_open()` 进行分面时会发生什么。
+
+```{r}
+p <- ggplot(mtcars, aes(disp, mpg)) +
+  facet_wrap(~factor(cyl)) +
+  geom_point() +
+  theme_half_open(12)
+
+stamp_ugly(p)
+```
+
+这三个分面在视觉上并不分开，因为 ggplot2 不会为每个面重复 y 轴线。我们可以通过标准 ggplot2 主题调用或使用便捷函数 `panel_border()` 在每个面板周围绘制边框来改善这种情况。与 `background_grid()` 一样，该函数始终必须放置在 theme 之后。
+
+```{r}
+p + panel_border()  # always place this after the theme
+```
+
+在这种特殊情况下，也许同时使用面板边框和背景网格是最好的选择。
+
+```{r}
+p + 
+  panel_border() +
+  background_grid()
+```
+
+
+
+## Empty themes
+
+两个主题 `theme_map()` 和 `theme_nothing()` 提供没有 axes 的精简主题。`theme_map()` 与 ggplot2 中的 `theme_void()` 类似，它保留了绘图标题、副标题、说明文字和图例，并简单地删除轴刻度、线条、标签和网格线。所有设置都与其他 cowplot 主题匹配，以便您可以使用 `theme_map()` 和其他 cowplot 主题混合绘图，并且它们看起来一致。
+
+为了演示这些主题如何工作以及它们如何与提供的其他主题交互，我们首先制作一个包含标题、副标题、说明文字和图例的标准散点图。
+
+```{r}
+p <- ggplot(mtcars, aes(disp, mpg, color = wt)) +
+  geom_point() +
+  labs(
+    title = "Fuel efficiency in cars",
+    subtitle = "Bigger and more powerful cars are less efficient",
+    caption = "Motor Trend, 1974"
+  )
+
+p + theme_cowplot(12)
+```
+
+使用 `theme_map()` 时，相同的绘图如下所示。
+
+```{r}
+p + theme_map(12)
+```
+
+请注意，此图与上一张图中保留的所有元素看起来都相同。
+
+如果我们使用 `theme_nothing()` 绘制相同的绘图，则除绘图面板之外的所有内容都将被删除，包括标题和图例。
+
+```{r}
+p + theme_nothing()
+```
+
+该主题由 `ggdraw()` 和 `plot_grid()` 用于封闭的绘图画布。
+
+
+
+
+
+
+
+
+
+
