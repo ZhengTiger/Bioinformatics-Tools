@@ -1,0 +1,695 @@
+---
+title: "6 The `circos.heatmap()` function"
+author: "TigerZ"
+date: 2023-08-21
+date-format: "YYYY-MM-DD"
+format: 
+  html:
+    embed-resources: true
+    toc: true
+    code-fold: show
+    code-tools: true
+---
+
+
+
+圆形热图很漂亮。使用 **circlize** 包，可以通过低级函数 `circos.rect()` 实现圆形热图，如前一章所述。从 0.4.10 版本开始，出现了一个新的高级函数 `circos.heatmap()`，它极大地简化了圆形热图的创建。在本节中，我将演示新的 `circos.heatmap()` 函数的用法。
+
+首先，我们生成一个随机矩阵并将其随机分为五组。
+
+```{r}
+set.seed(123)
+mat1 = rbind(cbind(matrix(rnorm(50*5, mean = 1), nr = 50), 
+                   matrix(rnorm(50*5, mean = -1), nr = 50)),
+             cbind(matrix(rnorm(50*5, mean = -1), nr = 50), 
+                   matrix(rnorm(50*5, mean = 1), nr = 50))
+            )
+rownames(mat1) = paste0("R", 1:100)
+colnames(mat1) = paste0("C", 1:10)
+mat1 = mat1[sample(100, 100), ] # randomly permute rows
+split = sample(letters[1:5], 100, replace = TRUE)
+split = factor(split, levels = letters[1:5])
+```
+
+```{r}
+knitr::kable(mat1[1:5,])
+```
+
+```{r}
+head(split)
+```
+
+下图是热图的正常布局（by [the ComplexHeatmap package](https://bioconductor.org/packages/release/bioc/html/ComplexHeatmap.html)）。
+
+```{r}
+#| message: false
+#| fig-cap: | 
+#|   Figure 6.1: A normal heatmap.
+
+library(ComplexHeatmap)
+Heatmap(mat1, row_split = split)
+```
+
+在接下来的部分中，我将演示如何通过圆形可视化它。
+
+
+
+## 6.1 Input data
+
+`circos.heatmap()` 的输入应该是一个矩阵（或一个将转换为一列矩阵的向量）。如果矩阵被分成组，则必须使用 `split` 参数指定分类变量。请注意，`split` 值应该是字符向量或因子。如果它是一个数字向量，它会在内部转换为字符。
+
+颜色是矩阵中值的重要美学映射。在 `circos.heatmap()` 中，用户必须使用用户定义的颜色模式指定 `col` 参数。如果矩阵是连续数字，则 `col` 的值应该是由 `colorRamp2()` 生成的颜色映射，如果矩阵是字符，则 `col` 的值应该是命名的颜色向量。
+
+下图是上一个热图的圆形版本。注意矩阵行沿圆周方向分布，矩阵列沿径向分布。在下图中，圆被分成五个 sectors，每个 sector 对应一个行分组。
+
+```{r}
+#| message: false
+#| fig-cap: | 
+#|   Figure 6.2: A circular heatmap which has been split.
+
+library(circlize) # >= 0.4.10
+col_fun1 = colorRamp2(c(-2, 0, 2), c("blue", "white", "red"))
+circos.heatmap(mat1, split = split, col = col_fun1)
+```
+
+```{r}
+circos.clear()
+```
+
+有一点非常重要，就是创建圆形热图后，必须调用 `circos.clear()` 来完全删除布局。我将在本文后面解释这一点。
+
+如果未指定 `split`，则只有一个大 sector 包含完整的热图。
+
+```{r}
+#| message: false
+#| fig-cap: | 
+#|   Figure 6.3: A circular heatmap which no split.
+
+circos.heatmap(mat1, col = col_fun1)
+```
+
+```{r}
+circos.clear()
+```
+
+
+
+## 6.2 Circular layout
+
+与 **circlize** 包生成的其他圆形图类似，在绘制图之前可以通过 `circos.par()` 控制圆形布局。
+
+热图轨道的参数可以在 `circos.heatmap()` 函数中控制，例如 `track.height`（轨道的高度）和 `bg.border`（轨道的边界）。
+
+在以下示例中，通过设置 `show.sector.labels` 参数来添加 sectors 的标签。sectors 的顺序为 `c("a", "b", "c", "d", "e")` 顺时针方向。您可以在下图中看到，sector `a` 从 $θ = 90^∘$ 开始。
+
+```{r}
+#| message: false
+#| fig-cap: | 
+#|   Figure 6.4: Circular heatmap. Control the layout.
+
+circos.par(start.degree = 90, gap.degree = 10)
+circos.heatmap(mat1, split = split, col = col_fun1, track.height = 0.4, 
+    bg.border = "green", bg.lwd = 2, bg.lty = 2, show.sector.labels = TRUE)
+```
+
+```{r}
+circos.clear()
+```
+
+如果 `split` 参数的值是一个 factor，则 factor levels 的顺序控制热图的顺序。如果 `split` 是一个简单向量，则热图的顺序 `unique(split)`。
+
+```{r}
+#| message: false
+#| fig-cap: | 
+#|   Figure 6.5: Circular heatmap. Control the order of heatmaps.
+
+# note since circos.clear() was called in the previous plot,
+# now the layout starts from theta = 0 (the first sector is 'e')
+circos.heatmap(mat1, split = factor(split, levels = c("e", "d", "c", "b", "a")), 
+    col = col_fun1, show.sector.labels = TRUE)
+```
+
+```{r}
+circos.clear()
+```
+
+
+
+## 6.3 Dendrograms and row names
+
+默认情况下，数值矩阵按行聚类，因此，聚类会生成树状图。`dend.side` 参数控制树状图相对于热图轨道的位置。请注意，树状图位于单独的轨道上。
+
+```{r}
+#| message: false
+#| fig-cap: | 
+#|   Figure 6.6: Circular heatmap. Control the dendrograms.
+
+circos.heatmap(mat1, split = split, col = col_fun1, dend.side = "inside")
+circos.clear()
+```
+
+树状图的高度由 `dend.track.height` 参数控制。
+
+可以通过设置 `rownames.side` 参数来绘制矩阵的行名称。行名称也绘制在单独的轨道中。
+
+```{r}
+#| message: false
+#| fig-cap: | 
+#|   Figure 6.7: Circular heatmap. Control the row names.
+
+circos.heatmap(mat1, split = split, col = col_fun1, rownames.side = "inside")
+circos.clear()
+text(0, 0, 'rownames.side = "inside"')
+```
+
+矩阵和树状图的行名称都可以绘制。当然，它们不能位于热图轨道的同一侧。
+
+```{r}
+#| message: false
+#| fig-cap: | 
+#|   Figure 6.8: Circular heatmap. Control both the dendrograms and row names.
+
+circos.heatmap(mat1, split = split, col = col_fun1, dend.side = "inside", 
+    rownames.side = "outside")
+circos.clear()
+```
+
+行名称的图形参数可以设置为标量或长度与矩阵中的行数相同的向量。
+
+```{r}
+#| message: false
+#| fig-cap: | 
+#|   Figure 6.9: Circular heatmap. Control graphic parameters for row names.
+
+circos.heatmap(mat1, split = split, col = col_fun1, rownames.side = "outside",
+    rownames.col = 1:nrow(mat1) %% 10 + 1,
+    rownames.cex = runif(nrow(mat1), min = 0.3, max = 2),
+    rownames.font = 1:nrow(mat1) %% 4 + 1)
+```
+
+```{r}
+circos.clear()
+```
+
+树状图的图形参数可以通过回调函数直接渲染树状图来设置，稍后将进行演示。
+
+
+
+## 6.4 Clustering
+
+默认情况下，数字矩阵按行聚集。`cluster` 参数可以设置为 `FALSE` 以关闭聚类。
+
+当然，当 `cluster` 设置为 `FALSE` 时，即使设置了 `dend.side`，也不会绘制树状图。
+
+```{r}
+#| message: false
+#| fig-cap: | 
+#|   Figure 6.10: Circular heatmap. Control clusterings.
+
+circos.heatmap(mat1, split = split, cluster = FALSE, col = col_fun1)
+circos.clear()
+```
+
+聚类方法和距离方法由 `clustering.method` 和 `distance.method` 参数控制。
+
+请注意 `circos.heatmap()` 不直接支持矩阵列上的聚类。您应该在发送到 `circos.heatmap()` 之前应用列重新排序，例如，
+
+```{r}
+column_od = hclust(dist(t(mat1)))$order
+circos.heatmap(mat1[, column_od], split = split, col = col_fun1)
+circos.clear()
+```
+
+
+
+## 6.5 Callback on dendrograms
+
+聚类生成树状图。在相应 sector 中生成树状图后，可以将回调函数应用于每个树状图。回调函数编辑树状图，例如 1.重新排序树状图，或 2.为树状图着色。
+
+在 `circos.heatmap()` 中，应将用户定义的函数设置为 `dend.callback` 参数。用户定义的函数应具有三个参数：
+
+-   `dend`: The dendrogram in the current sector.
+-   `m`: The sub-matrix that corresponds to the current sector.
+-   `si`: The sector index (or the sector name) for the current sector.
+
+默认回调函数定义如下，它通过对矩阵行均值进行加权来重新排序树状图。
+
+```{r}
+#| eval: false
+
+function(dend, m, si) reorder(dend, rowMeans(m))
+```
+
+以下示例通过 `dendsort::dendsort()` 对每个 sector 中的树状图重新排序。
+
+```{r}
+#| message: false
+#| warning: false
+#| fig-cap: | 
+#|   Figure 6.11: Circular Heatmap. Reorder dendrograms.
+
+library(dendsort)
+circos.heatmap(mat1, split = split, col = col_fun1, dend.side = "inside",
+    dend.callback = function(dend, m, si) {
+        dendsort(dend)
+    }
+)
+circos.clear()
+```
+
+我们可以使用 **dendextend** 包中的 `color_branches()` 来渲染树状图边缘。例如，为五个 sectors 中的树状图分配不同的颜色。这里树状图轨道的高度通过 `dend.track.height` 参数增加。
+
+```{r}
+#| message: false
+#| warning: false
+#| fig-cap: | 
+#|   Figure 6.12: Circular heatmap. Render dendrograms that were split.
+
+library(dendextend)
+dend_col = structure(1:5, names = letters[1:5])
+circos.heatmap(mat1, split = split, col = col_fun1, dend.side = "inside",
+    dend.track.height = 0.2,
+    dend.callback = function(dend, m, si) {
+        # when k = 1, it renders one same color for the whole dendrogram
+        color_branches(dend, k = 1, col = dend_col[si])
+    }
+)
+circos.clear()
+```
+
+或者，如果矩阵没有 split，我们可以为子树状图分配不同的颜色。
+
+```{r}
+#| message: false
+#| warning: false
+#| fig-cap: | 
+#|   Figure 6.13: Circular heatmap. Render dendrograms.
+
+circos.heatmap(mat1, col = col_fun1, dend.side = "inside",
+    dend.track.height = 0.2,
+    dend.callback = function(dend, m, si) {
+        color_branches(dend, k = 4, col = 2:5)
+    }
+)
+circos.clear()
+```
+
+
+## 6.6 Multiple heatmap tracks
+
+如果您制作一个仅包含一个热图轨道的圆形图，则使用 `circos.heatmap()` 非常简单。如果您制作包含多个轨道的更复杂的圆形图，您应该了解有关 `circos.heatmap()` 的更多详细信息。
+
+`circos.heatmap()` 的第一次调用实际上初始化了布局，即应用 clustering 和 splitting 矩阵。树状图和分割变量存储在内部。这就是为什么你应该显式调用 `circos.clear()` 来删除所有内部变量，这样可以确保当你制作新的圆形热图时，第一次调用 `circos.heatmap()` 是在一个干净的环境中。
+
+`circos.heatmap()` 的第一次调用确定所有轨道的行排序（圆周方向的顺序），因此，后续轨道中的矩阵与第一个轨道中的矩阵共享相同的行排序。此外，后续轨道中的矩阵也会根据第一个热图轨道中的 split 进行分割。
+
+如果在第一个热图轨道中未应用聚类，则使用行的自然排序（i.e., `c(1, 2, ..., n)`）。
+
+```{r}
+mat2 = mat1[sample(100, 100), ] # randomly permute mat1 by rows
+col_fun2 = colorRamp2(c(-2, 0, 2), c("green", "white", "red"))
+
+circos.heatmap(mat1, split = split, col = col_fun1, dend.side = "outside")
+circos.heatmap(mat2, col = col_fun2)
+circos.clear()
+```
+
+如果我切换这两个轨道，您现在可以看到聚类由第一个热图轨道（绿-红色热图轨道）控制。
+
+```{r}
+circos.heatmap(mat2, split = split, col = col_fun2, dend.side = "outside")
+circos.heatmap(mat1, col = col_fun1)
+circos.clear()
+```
+
+你可能想问，如果我不希望聚类由第一条轨道决定，而由第二条或第三条轨道决定怎么办？解决方案很简单。正如我提到的，第一次调用 `circos.heatmap()` 会初始化布局。实际上，可以通过显式调用 `circos.heatmap()` 内部调用的 `circos.heatmap.initialize()` 函数来手动完成初始化。
+
+在 `circos.heatmap.initialize()` 中，您指定要应用聚类的任何矩阵以及 split 变量，然后，以下 `circos.heatmap()` 调用都共享此布局。
+
+在以下示例中，全局布局由第二个轨道中可视化的 `mat1` 确定。我在第一个轨道中设置 `dend.side = "outside"`，实际上你可以发现树状图实际上是根据第二个轨道中的矩阵生成的。
+
+```{r}
+circos.heatmap.initialize(mat1, split = split)
+circos.heatmap(mat2, col = col_fun2, dend.side = "outside")
+circos.heatmap(mat1, col = col_fun1)
+circos.clear()
+```
+
+在下一个示例中，热图布局是从 `mat1` 生成的，而两个热图轨道仅包含五列。
+
+```{r}
+circos.heatmap.initialize(mat1, split = split)
+circos.heatmap(mat1[, 1:5], col = col_fun1)
+circos.heatmap(mat1[, 6:10], col = col_fun1)
+circos.clear()
+```
+
+
+
+## 6.7 With other tracks
+
+`circos.heatmap()` 也可以与其他非热图轨道集成，但是，这有点棘手。在圆形布局中，x 轴和 y 轴上的值只是数字索引。假设一个 sector 中的热图有 `nr` 行和 `nc` 列，热图行以 `(0, 1), c(1, 2), …, c(nr-1, nr)` 的间隔绘制，对于热图列也类似。原始矩阵也被重新排序。如果添加更多轨道以确保与热图轨道具有正确的对应关系，则需要考虑所有这些影响。
+
+热图布局完成后，可以通过特殊变量 `CELL_META` 检索 tracks/sectors/cells 的附加信息。cell/sector 的附加元数据列出如下，它们对于正确对应热图轨道非常重要。
+
+-   `CELL_META$row_dend` 或简称 `CELL_META$dend`：当前 sector 中的树状图。如果未进行聚类，则该值为 `NULL`。
+-   `CELL_META$row_order` 或简称 `CELL_META$order`：聚类后当前 sector 中子矩阵的行排序。如果未进行聚类，则值为 `c(1, 2, ..., )`。
+-   `CELL_META$subset`：原始完整矩阵中索引的子集。这些值按递增顺序排序。
+
+以下是示例圆形热图中第一个 sector 中 `CELL_META$row_dend`、`CELL_META$row_order` 和 `CELL_META$subset` 的输出。
+
+```{r}
+#| eval: false
+
+CELL_META$row_dend
+## 'dendrogram' with 2 branches and 14 members total, at height 10.51736 
+
+CELL_META$row_order
+## [1]  2  6  4 12  8  1  5 10  7  9 13 11  3 14
+
+CELL_META$subset
+## [1]  8  9 14 18 20 37 55 62 66 72 78 85 93 97
+```
+
+在下面的示例中，我添加了一个轨道，用于可视化 `mat1` 中前五列的行平均值。我添加了 `cell.padding = c(0.02, 0, 0.02, 0)` 以便最大和最小点不会与单元格的顶部和底部边框重叠。
+
+```{r}
+circos.heatmap(mat1, split = split, col = col_fun1)
+row_mean = rowMeans(mat1[, 1:5])
+circos.track(ylim = range(row_mean), panel.fun = function(x, y) {
+    y = row_mean[CELL_META$subset]
+    y = y[CELL_META$row_order]
+    circos.lines(CELL_META$cell.xlim, c(0, 0), lty = 2, col = "grey")
+    circos.points(seq_along(y) - 0.5, y, col = ifelse(y > 0, "red", "blue"))
+}, cell.padding = c(0.02, 0, 0.02, 0))
+circos.clear()
+```
+
+同样，如果将点轨道作为第一轨道，则应提前初始化布局。
+
+```{r}
+circos.heatmap.initialize(mat1, split = split)
+# This is the same as the previous example
+circos.track(ylim = range(row_mean), panel.fun = function(x, y) {
+    y = row_mean[CELL_META$subset]
+    y = y[CELL_META$row_order]
+    circos.lines(CELL_META$cell.xlim, c(0, 0), lty = 2, col = "grey")
+    circos.points(seq_along(y) - 0.5, y, col = ifelse(y > 0, "red", "blue"))
+}, cell.padding = c(0.02, 0, 0.02, 0))
+circos.heatmap(mat1, col = col_fun1) # no need to specify 'split' here
+circos.clear()
+```
+
+箱线图经常用于对应矩阵行。
+
+```{r}
+circos.heatmap(mat1, split = split, col = col_fun1)
+circos.track(ylim = range(mat1), panel.fun = function(x, y) {
+    m = mat1[CELL_META$subset, 1:5, drop = FALSE]
+    m = m[CELL_META$row_order, , drop = FALSE]
+    n = nrow(m)
+    # circos.boxplot is applied on matrix columns, so here we transpose it.
+    circos.boxplot(t(m), pos = 1:n - 0.5, pch = 16, cex = 0.3)
+    circos.lines(CELL_META$cell.xlim, c(0, 0), lty = 2, col = "grey")
+}, cell.padding = c(0.02, 0, 0.02, 0))
+circos.clear()
+```
+
+
+
+## 6.8 Add annotations
+
+可以通过设置 `show.sector.labels = TRUE` 添加 sectors 的标签，但是，这不会提供对标签的任何自定义。用户可以通过自定义一个 `panel.fun` 函数来定制自己的标签，演示如下。这里，标签添加到距热图轨道 2mm 处（通过定义 y 方向偏移的 `convert_y(2, "mm")`）。
+
+在这里，我设置 `track.index = get.current.track.index()` 以确保标签始终添加到正确的轨道中。
+
+```{r}
+#| message: false
+
+circos.heatmap(mat1, split = split, col = col_fun1)
+circos.track(track.index = get.current.track.index(), panel.fun = function(x, y) {
+    circos.text(CELL_META$xcenter, CELL_META$cell.ylim[2] + convert_y(2, "mm"), 
+        paste0("this is group ", CELL_META$sector.index),
+        facing = "bending.inside", cex = 0.8,
+        adj = c(0.5, 0), niceFacing = TRUE)
+}, bg.border = NA)
+circos.clear()
+```
+
+`circos.heatmap()` 不直接支持矩阵的列名称，但也可以通过自定义 `panel.fun` 函数轻松添加它们。在下面的例子中，我通过 `circos.par()` 中的 `gap.after` 参数在最后一个 sector（第五个 sector）之后设置了更大的空间（10 度，用户通常需要尝试多个值以获得最佳空间），稍后我绘制了 `panel.fun` 中最后一个扇区的列名称。
+
+```{r}
+#| message: false
+
+circos.par(gap.after = c(2, 2, 2, 2, 10))
+circos.heatmap(mat1, split = split, col = col_fun1, track.height = 0.4)
+circos.track(track.index = get.current.track.index(), panel.fun = function(x, y) {
+    if(CELL_META$sector.numeric.index == 5) { # the last sector
+        cn = colnames(mat1)
+        n = length(cn)
+        circos.text(rep(CELL_META$cell.xlim[2], n) + convert_x(1, "mm"), 
+            1:n - 0.5, cn, 
+            cex = 0.5, adj = c(0, 0.5), facing = "inside")
+    }
+}, bg.border = NA)
+circos.clear()
+```
+
+下一个示例添加矩形和标签以显示矩阵中的两组列。`panel.fun` 里面的代码很简单。它基本上绘制矩形和文本。`Convert_x()` 将 x 方向上的单位转换为在圆坐标系中测量的适当值。
+
+```{r}
+#| message: false
+
+circos.par(gap.after = c(2, 2, 2, 2, 10))
+circos.heatmap(mat1, split = split, col = col_fun1, track.height = 0.4)
+circos.track(track.index = get.current.track.index(), panel.fun = function(x, y) {
+    if(CELL_META$sector.numeric.index == 5) { # the last sector
+        circos.rect(CELL_META$cell.xlim[2] + convert_x(1, "mm"), 0,
+                    CELL_META$cell.xlim[2] + convert_x(5, "mm"), 5,
+                    col = "orange", border = NA)
+        circos.text(CELL_META$cell.xlim[2] + convert_x(3, "mm"), 2.5,
+                    "group 1", cex = 0.5, facing = "clockwise")
+
+        circos.rect(CELL_META$cell.xlim[2] + convert_x(1, "mm"), 5,
+                    CELL_META$cell.xlim[2] + convert_x(5, "mm"), 10,
+                    col = "pink", border = NA)
+        circos.text(CELL_META$cell.xlim[2] + convert_x(3, "mm"), 7.5,
+                    "group 2", cex = 0.5, facing = "clockwise")
+    }
+}, bg.border = NA)
+circos.clear()
+```
+
+**circlize** 不会生成图例，但可以通过 `ComplexHeatmap::Legend()` 函数手动生成图例并将其添加到圆形图中。以下是添加图例的简单示例。在下一节中，您可以找到添加许多图例的更复杂的示例。
+
+```{r}
+circos.heatmap(mat1, split = split, col = col_fun1)
+circos.clear()
+
+library(ComplexHeatmap)
+lgd = Legend(title = "mat1", col_fun = col_fun1)
+grid.draw(lgd)
+```
+
+
+
+## 6.9 A complex example of circular heatmaps
+
+在本节中，我将演示如何制作复杂的圆形热图。正常布局中的热图如下图所示，现在我将其更改为圆形布局。
+
+热图可视化 DNA methylation、gene expression 和其他基因组水平信息之间的相关性。您可以访问此[链接](http://jokergoo.github.io/supplementary/ComplexHeatmap-supplementary1-4/supplS3_methylation/supplS3_methylation.html)查看原始热图是如何生成的。
+
+![](https://user-images.githubusercontent.com/449218/82558169-5cddc600-9b6d-11ea-9108-0704751ac6ea.png)
+
+原始热图是使用随机数据集生成的。生成它们的代码可在 <https://gist.github.com/jokergoo/0ea5639ee25a7edae3871ed8252924a1> 上找到。这里我直接从 Gist 获取脚本。
+
+```{r}
+source("https://gist.githubusercontent.com/jokergoo/0ea5639ee25a7edae3871ed8252924a1/raw/57ca9426c2ed0cebcffd79db27a024033e5b8d52/random_matrices.R")
+```
+
+与原始热图类似，通过对甲基化矩阵 (`mat_meth`) 的行应用 k-means 聚类，将所有热图的行分为 5 组。
+
+```{r}
+set.seed(123)
+km = kmeans(mat_meth, centers = 5)$cluster
+```
+
+现在有以下矩阵/向量需要可视化为热图：
+
+-   `mat_meth`：一个矩阵，其中行对应于差异甲基化区域 (DMRs)。矩阵中的值是每个样品中 DMR 的平均甲基化水平。
+-   `mat_expr`：一个矩阵，其中行对应于与 DMR 相关的基因（即距离 DMR 最近的基因）。矩阵中的值是每个样本中每个基因的表达水平。样本中每个基因的表达都按比例缩放。
+-   `Direction`：甲基化变化的方向（hyper 表示肿瘤样本中甲基化程度较高，hypo 表示肿瘤样本中甲基化程度较低）。
+-   `cor_pvalue`：相关基因甲基化和表达之间相关性测试的 p-value。值经过 -log10 转换。
+-   `gene_type`：基因的类型（例如，蛋白质编码基因或 lincRNA）。
+-   `anno_gene`：基因模型的注释（即基因间、基因内或转录起始位点（TSS））。
+-   `dist`：从相关基因的 DMR 到 TSS 的距离。
+-   `anno_enhancer`：每个 DMR 与增强子重叠的部分。
+
+在这些变量中，`mat_meth`、`mat_expr`、`cor_pvalue`、`dist` 和 `anno_enhancer` 是数字，我为它们设置了颜色映射函数。对于其他的，我设置了命名的颜色向量。
+
+在下面的代码中，我在第一次调用 `circos.heatmap()` 时指定 `split`，这是甲基化热图。轨道高度是手动调节的。
+
+```{r}
+col_meth = colorRamp2(c(0, 0.5, 1), c("blue", "white", "red"))
+circos.heatmap(mat_meth, split = km, col = col_meth, track.height = 0.12)
+
+col_direction = c("hyper" = "red", "hypo" = "blue")
+circos.heatmap(direction, col = col_direction, track.height = 0.01)
+
+col_expr = colorRamp2(c(-2, 0, 2), c("green", "white", "red"))
+circos.heatmap(mat_expr, col = col_expr, track.height = 0.12)
+
+col_pvalue = colorRamp2(c(0, 2, 4), c("white", "white", "red"))
+circos.heatmap(cor_pvalue, col = col_pvalue, track.height = 0.01)
+
+library(RColorBrewer)
+col_gene_type = structure(brewer.pal(length(unique(gene_type)), "Set3"), names = unique(gene_type))
+circos.heatmap(gene_type, col = col_gene_type, track.height = 0.01)
+
+col_anno_gene = structure(brewer.pal(length(unique(anno_gene)), "Set1"), names = unique(anno_gene))
+circos.heatmap(anno_gene, col = col_anno_gene, track.height = 0.01) 
+
+col_dist = colorRamp2(c(0, 10000), c("black", "white"))
+circos.heatmap(dist, col = col_dist, track.height = 0.01)
+
+col_enhancer = colorRamp2(c(0, 1), c("white", "orange"))
+circos.heatmap(anno_enhancer, col = col_enhancer, track.height = 0.03)
+```
+
+```{r}
+circos.clear()
+```
+
+圆形热图看起来很漂亮！由于矩阵中的行是基因组区域（差异甲基化区域），如果我们可以在某些区域之间建立连接，例如 3D 染色体结构中的物理相互作用，绘图会更好、更有用。
+
+在下面的代码中，我生成了 DMR 之间的一些随机交互。`df_link` 中的每一行表示存在从第 i 个 DMR 到第 j 个 DMR 的交互。
+
+```{r}
+df_link = data.frame(
+    from_index = sample(nrow(mat_meth), 20),
+    to_index = sample(nrow(mat_meth), 20)
+)
+```
+
+在圆形热图上找到这些 DMR 的位置非常棘手。检查以下代码中的注释。请注意，这里的 `subset` 和 `row_order` 元数据是由 `get.cell.meta.data()` 函数通过显式指定 sector 索引来检索的。
+
+```{r}
+#| eval: false
+
+for(i in seq_len(nrow(df_link))) {
+    # Let's call the DMR with index df_link$from_index[i] as DMR1,
+    # and the other one with index df_link$to_index[i] as DMR2.
+
+    # The sector where DMR1 is in.
+    group1 = km[ df_link$from_index[i] ]
+    # The sector where DMR2 is in.
+    group2 = km[ df_link$to_index[i] ]
+
+    # The subset of DMRs (row indices from mat_meth) in sector `group1`.
+    subset1 = get.cell.meta.data("subset", sector.index = group1)
+    # The row ordering in sector `group1`.
+    row_order1 = get.cell.meta.data("row_order", sector.index = group1)
+    # This is the position of DMR1 in the `group1` heatmap.
+    x1 = which(subset1[row_order1] == df_link$from_index[i])
+
+    # The subset of DMRs (row indices from mat_meth) in sector `group2`.
+    subset2 = get.cell.meta.data("subset", sector.index = group2)
+    # The row ordering in sector `group2`.
+    row_order2 = get.cell.meta.data("row_order", sector.index = group2)
+    # This is the position of DMR2 in the `group2` heatmap.
+    x2 = which(subset2[row_order2] == df_link$to_index[i])
+
+    # We take the middle point and draw a link between DMR1 and DMR2
+    circos.link(group1, x1 - 0.5, group2, x2 - 0.5, col = rand_color(1))
+}
+```
+
+为了让事情变得更简单，我实现了一个函数 `circos.heatmap.link()` ，它基本上包装了上面的代码。现在在矩阵行之间绘制链接更简单：
+
+```{r}
+#| eval: false
+
+for(i in seq_len(nrow(df_link))) {
+    circos.heatmap.link(df_link$from_index[i],
+                        df_link$to_index[i],
+                        col = rand_color(1))
+}
+```
+
+添加链接后，图看起来更好了！
+
+![](https://jokergoo.github.io/circlize_book/book/06-circos-heatmap_files/figure-html/unnamed-chunk-39-1.png)
+
+图例对于理解热图很重要。不幸的是，**circlize** 本身并不支持图例，但是，circlize 图可以与 `ComplexHeatmap::Legend()` 生成的图例结合起来。按照该链接的说明，我们需要一个绘制 circlize 图的函数和一个 `Legends` 对象（它是 `grid::grob` 对象）。
+
+绘制圆形图的函数只是之前代码的包装，没有任何修改。
+
+```{r}
+#| eval: false
+
+circlize_plot = function() {
+    circos.heatmap(mat_meth, split = km, col = col_meth, track.height = 0.12)
+    circos.heatmap(direction, col = col_direction, track.height = 0.01)
+    circos.heatmap(mat_expr, col = col_expr, track.height = 0.12)
+    circos.heatmap(cor_pvalue, col = col_pvalue, track.height = 0.01)
+    circos.heatmap(gene_type, col = col_gene_type, track.height = 0.01)
+    circos.heatmap(anno_gene, col = col_anno_gene, track.height = 0.01) 
+    circos.heatmap(dist, col = col_dist, track.height = 0.01)
+    circos.heatmap(anno_enhancer, col = col_enhancer, track.height = 0.03)
+
+    for(i in seq_len(nrow(df_link))) {
+        circos.heatmap.link(df_link$from_index[i],
+                            df_link$to_index[i],
+                            col = rand_color(1))
+    }
+    circos.clear()
+}
+```
+
+图例可以从颜色映射函数和颜色向量生成。`ComplexHeatmap::Legend()` 函数非常灵活，您可以自定义图例上的标签（请参阅如何定义 `lgd_pvalue`、`lgd_dist` 和 `lgd_enhancer`）。
+
+```{r}
+#| eval: false
+
+lgd_meth = Legend(title = "Methylation", col_fun = col_meth)
+lgd_direction = Legend(title = "Direction", at = names(col_direction), 
+    legend_gp = gpar(fill = col_direction))
+lgd_expr = Legend(title = "Expression", col_fun = col_expr)
+lgd_pvalue = Legend(title = "P-value", col_fun = col_pvalue, at = c(0, 2, 4), 
+    labels = c(1, 0.01, 0.0001))
+lgd_gene_type = Legend(title = "Gene type", at = names(col_gene_type), 
+    legend_gp = gpar(fill = col_gene_type))
+lgd_anno_gene = Legend(title = "Gene anno", at = names(col_anno_gene), 
+    legend_gp = gpar(fill = col_anno_gene))
+lgd_dist = Legend(title = "Dist to TSS", col_fun = col_dist, 
+    at = c(0, 5000, 10000), labels = c("0kb", "5kb", "10kb"))
+lgd_enhancer = Legend(title = "Enhancer overlap", col_fun = col_enhancer, 
+    at = c(0, 0.25, 0.5, 0.75, 1), labels = c("0%", "25%", "50%", "75%", "100%"))
+```
+
+现在我们使用 **gridBase** 来组合基础图形（**circlize** 是通过基础图形实现的）和 **grid** 图形（**ComplexHeatmap** 是通过 **grid** 图形实现的）。如果您想尝试，可以使用以下代码作为绘图模板。
+
+```{r}
+#| eval: false
+
+library(gridBase)
+plot.new()
+circle_size = unit(1, "snpc") # snpc unit gives you a square region
+
+pushViewport(viewport(x = 0, y = 0.5, width = circle_size, height = circle_size,
+    just = c("left", "center")))
+par(omi = gridOMI(), new = TRUE)
+circlize_plot()
+upViewport()
+
+h = dev.size()[2]
+lgd_list = packLegend(lgd_meth, lgd_direction, lgd_expr, lgd_pvalue, lgd_gene_type, 
+    lgd_anno_gene, lgd_dist, lgd_enhancer, max_height = unit(0.9*h, "inch"))
+draw(lgd_list, x = circle_size, just = "left")
+```
+
+![](https://jokergoo.github.io/circlize_book/book/06-circos-heatmap_files/figure-html/unnamed-chunk-42-1.png)
+
+
+
+

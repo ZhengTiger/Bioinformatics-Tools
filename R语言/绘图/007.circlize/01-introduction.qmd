@@ -1,0 +1,345 @@
+---
+title: "1 Introduction"
+author: "TigerZ"
+date: 2023-08-21
+date-format: "YYYY-MM-DD"
+format: 
+  html:
+    embed-resources: true
+    toc: true
+    code-fold: show
+    code-tools: true
+---
+
+
+
+圆形布局（Circular layout）对于表示复杂的信息非常有用。首先，它优雅地表示长轴或大量类别的信息；其次，直观地展示聚焦于同一物体的多个轨迹的数据；第三，它很容易展示元素之间的关系。它提供了一种有效的方式来排列圆圈上的信息，而且很漂亮。
+
+[Circos](http://circos.ca/) 是一个先锋工具广泛用于用 Perl 语言中的圆形布局表示。它极大地增强了科学结果的可视化（特别是在基因组学领域）。因此，具有圆形布局的图通常被称为 **“circos plot”**。这里 **circlize** 包的目的是在 R 中实现 **Circos**。在 R 中实现的一个重要优点是 R 是一个理想的环境，可以在数据分析和数据可视化之间提供无缝连接。 **circlize** 不是为 **Circos** 生成配置文件的前端包装器，而是通过使用 R 优雅的统计和图形引擎以 R 风格完全编码。我们的目标是保持 **Circos** 的灵活性和可配置性，同时使该软件包更易于使用，并增强它以支持更多类型的图形。
+
+在本书中，第一部分的章节详细概述了一般 **circlize** 功能。第二部分介绍专门为可视化基因组数据集而设计的函数。第三部分给出了通过弦图（Chord diagram）可视化关系的综合指南。
+
+
+
+## 1.1 Principle of design
+
+圆形布局由扇区（sectors）和轨道（tracks）组成。对于不同类别的数据，它们被分配到不同的 sectors，而对于同一类别的多个测量，它们被表示为从圆外到内的堆叠 tracks。sector 和 track 的交点称为一个 cell (or a grid, a panel)，它是圆形布局中的基本单元。它是用于绘制数据点的假想绘图区域。
+
+由于大多数图形都是由点、线、多边形等简单图形组成，**circlize** 实现了在圆形绘图区域添加图形的低级图形函数，这样可以通过不同的低级图形组合轻松生成更复杂的图形。这一原则保证了通用性，即高级图形的类型不受软件本身的限制，并且可以在其上构建针对特定兴趣的高级包。
+
+目前有以下低级图形函数可用于添加图形。用法与来自基本图形引擎没有 `circos.` 前缀的函数非常相似，除了有一些专门为圆形可视化设计的增强功能。
+
+-   `circos.points()`: adds points in a cell.
+-   `circos.lines()`: adds lines in a cell.
+-   `circos.segments()`: adds segments in a cell.
+-   `circos.rect()`: adds rectangles in a cell.
+-   `circos.polygon()`: adds polygons in a cell.
+-   `circos.text()`: adds text in a cell.
+-   `circos.axis()` ands `circos.yaxis()`: add axis in a cell.
+
+以下函数绘制圆中两个位置之间的链接：
+
+-   `circos.link()`
+
+以下函数绘制高级图形：
+
+-   `circos.barplot()`: draw barplots.
+-   `circos.boxplot()`: draw boxplots.
+-   `circos.violin()`: draws violin plots.
+-   `circos.heatmap()`: draw circular heatmaps.
+-   `circos.raster()`: draw raster images.
+-   `circos.arrow()`: draw circular arrows.
+
+以下功能安排圆形布局。
+
+-   `circos.initialize()`: allocates sectors on the circle.
+-   `circos.track()`: creates plotting regions for cells in one single track.
+-   `circos.update()`: updates an existed cell.
+-   `circos.par()`: graphic parameters.
+-   `circos.info()`: prints general parameters of current circular plot.
+-   `circos.clear()`: resets graphic parameters and internal variables.
+
+因此，理论上，您可以通过上述功能绘制大多数类型的圆形图形。[Figure 1.1](https://jokergoo.github.io/circlize_book/book/introduction.html#fig:circlize-example) 列出了 **circlize** 制作的几个复杂的圆形图。读完这本书后，你一定能够实现你的目标。
+
+![Figure 1.1: Examples by circlize](https://jokergoo.github.io/circlize_book/book/images/ciclize_examples.jpg)
+
+
+
+## 1.2 A quick glance
+
+在我们深入了解细节之前，我首先演示一个使用 **circlize** 包中的基本功能的简单示例，以帮助您了解该包的工作原理。
+
+首先让我们生成一些随机数据。需要一个字符向量来表示类别，一个 x 值的数值向量和一个 y 值的向量。
+
+```{r}
+set.seed(999)
+n = 1000
+df = data.frame(sectors = sample(letters[1:8], n, replace = TRUE),
+                x = rnorm(n), y = runif(n))
+knitr::kable(df[1:5,])
+```
+
+首先我们初始化圆形布局。根据每个类别中 x-axes 上的数据范围，将圆分为多个 sectors。在下面的代码中，`df$x` 被 `df$sectors` 分割，并且根据每个类别的数据范围自动计算 sectors 的宽度。默认情况下，sectors 定位从 θ = 0（在极坐标系中）并沿顺时针方向走一圈。 运行以下代码后您可能看不到任何内容，因为尚未添加任何 track。
+
+```{r}
+#| warning: false
+
+library(circlize)
+circos.par("track.height" = 0.1)
+circos.initialize(df$sectors, x = df$x)
+```
+
+我们通过选项函数 `circis.par()` 将全局参数 `track.height` 设置为 0.1，以便所有要添加的 tracks 的默认高度为 0.1。**circlize** 使用的圆的半径始终为 1，因此高度 0.1 表示圆半径的 10%。在后面的章节中，您可以找到如何使用物理单位设置高度，例如 cm。
+
+注意，sectors 的分配只需要 x 方向（或圆周方向）上的值，y 方向（径向）上的值将在创建 tracks 的步骤中使用。
+
+初始化圆形布局后，可以将图形以 track-by-track 的方式添加到绘图中。在绘制任何东西之前，我们需要知道所有 tracks 应该首先由 `circos.trackPlotRegion()` 或者简称 `circos.track()` 创建，然后可以添加低级函数。想想在基本的 R 图形引擎中，你需要首先调用 `plot()`，然后你可以使用 `points()` 和 `lines()` 等函数来添加图形。由于 track 中单元格的 x 范围已经在初始化步骤中定义，因此这里我们只需要指定每个单元格的 y 范围。y 范围可以由 y 参数指定为数值向量（以便在每个单元格中自动提取和计算 y 范围）或 `ylim` 参数指定为长度为 2 的向量。原则上，同一 track 中的所有单元格的 y 范围应相同。（See Figure 1.2）
+
+```{r}
+#| warning: false
+#| message: false
+#| fig-cap: | 
+#|   Figure 1.2: First example of circlize, add the first track.
+
+circos.par("track.height" = 0.1)
+circos.initialize(df$sectors, x = df$x)
+
+# add code
+circos.track(df$sectors, y = df$y,
+             panel.fun = function(x, y) {
+               circos.text(CELL_META$xcenter, 
+                           CELL_META$cell.ylim[2] + mm_y(5), 
+                           CELL_META$sector.index)
+               circos.axis(labels.cex = 0.6)
+               }
+             )
+col = rep(c("#FF0000", "#00FF00"), 4)
+circos.trackPoints(df$sectors, df$x, df$y, col = col, pch = 16, cex = 0.5)
+circos.text(-1, 0.5, "text", sector.index = "a", track.index = 1)
+```
+
+圆形图的轴通常绘制在圆的最外侧。这里我们通过将 `circos.axis()` 放入自定义函数 `panel.fun` 中来在第一个 track 中添加轴（参见上面的代码）。`circos.track()` 以逐个单元格的方式创建绘图区域，并且 `panel.fun` 实际上是在创建某个单元格的绘图区域后立即执行的。因此，`panel.fun` 实际上意味着在“当前单元格”中添加图形（`panel.fun` 的用法将在 [Section 2.7](https://jokergoo.github.io/circlize_book/book/circular-layout.html#panel-fun) 中进一步讨论）。在不指定任何参数的情况下，`circos.axis()` 在每个单元格的顶部（或每个单元格的外部）绘制 x 轴。
+
+此外，我们使用 `circos.text()` 在第一个 track 之外添加 sector 名称。`CELL_META` 提供当前单元格的 “meta information”。`CELL_META` 可以检索多个参数。[Section 2.7](https://jokergoo.github.io/circlize_book/book/circular-layout.html#panel-fun) 解释了它的所有用法。在上面的代码中，sector 名称绘制在单元格之外，您可能会看到警告消息，指出数据点超出了绘图区域。这完全没问题，不用担心。您还可以通过创建一个无边框的空 track 作为第一个 track 并在其中添加 sector 名称（就像在完成后续章节之后的 `circos.initializeWithIdeogram()` 和 `cordDiagram()` 所做的那样）。
+
+指定文本在 y 方向上的位置时，将在文本的 y 位置上添加 `mm_y(5)` (5mm) 的偏移量。在 `circos.text()` 中，x 和 y 值是在数据坐标（单元格中的坐标）中测量的，并且有一些辅助函数可以将绝对单位转换为数据坐标中的相应值。[Section 2.8.2](https://jokergoo.github.io/circlize_book/book/circular-layout.html#convert-functions) 提供了不同坐标下单位转换的更多信息。
+
+创建 track 后，通过 `circos.trackPoints()` 将点添加到第一个 track。`circos.trackPoints()` 只是同时在所有单元格中添加点。正如 [Section 3.2](https://jokergoo.github.io/circlize_book/book/graphics.html#points) 中进一步解释的那样，可以通过将 `circos.text()` 放入 `panel.fun` 来替换它，但是，如果只需要将点放入单元格中，则 `circos.trackPoints()` 会更方便（但我不这样做）真的不推荐）。很容易理解，这个函数需要一个分类变量（`df$sectors`）、x 方向和 y 方向的值（`df$x` 和 `df$y`）。
+
+低级函数（例如 `circos.text()`）也可以在 `panel.fun` 外部使用，如上面的代码所示。如果是这样，则需要显式指定 `sector.index` 和 `track.index`，因为“当前” sector 和“当前” track 可能不是您想要的。如果图形直接添加到最近创建的 track 中，则可以省略 `track.index`，因为该 track 仅被标记为“当前” track。
+
+好了，现在我们将直方图添加到第二条轨道。这里 `circos.trackHist()` 是一个高级函数，这意味着它创建一个新轨道（正如您可以想象的那样，`hist()` 也是一个高级函数）。`bin.size` 被显式设置，以便所有单元格中直方图的 bin 大小相同并且可以相互比较。（See [Figure 1.3](https://jokergoo.github.io/circlize_book/book/introduction.html#fig:circlize-glance-track-2)）
+
+```{r}
+#| warning: false
+#| message: false
+#| fig-cap: | 
+#|   Figure 1.3: First example of circlize, add the second track.
+
+circos.par("track.height" = 0.1)
+circos.initialize(df$sectors, x = df$x)
+circos.track(df$sectors, y = df$y,
+             panel.fun = function(x, y) {
+               circos.text(CELL_META$xcenter, 
+                           CELL_META$cell.ylim[2] + mm_y(5), 
+                           CELL_META$sector.index)
+               circos.axis(labels.cex = 0.6)
+               }
+             )
+col = rep(c("#FF0000", "#00FF00"), 4)
+circos.trackPoints(df$sectors, df$x, df$y, col = col, pch = 16, cex = 0.5)
+circos.text(-1, 0.5, "text", sector.index = "a", track.index = 1)
+
+# add code
+bgcol = rep(c("#EFEFEF", "#CCCCCC"), 4)
+circos.trackHist(df$sectors, df$x, bin.size = 0.2, bg.col = bgcol, col = NA)
+```
+
+在第三条轨道和 `panel.fun` 中，我们在每个单元格中随机选取 10 个数据点，按 x 值对它们进行排序，并用线将它们连接起来。在下面的代码中，当 `sectors`（第一个未命名参数）、`x` 和 `y` 参数在 `circos.track()` 中设置时，x 值和 y 值被 `df$sectors` 分割，并且 x 和 y 值的相应子集被发送到 `panel.fun`，通过 `panel.fun` 的 `x` 和 `y` 参数。因此，`panel.fun` 中的 `x` 和 `y` 正是“当前”单元格中的值。（See [Figure 1.4](https://jokergoo.github.io/circlize_book/book/introduction.html#fig:circlize-glance-track-3)）
+
+```{r}
+#| warning: false
+#| message: false
+#| fig-cap: | 
+#|   Figure 1.4: First example of circlize, add the third track.
+
+circos.par("track.height" = 0.1)
+circos.initialize(df$sectors, x = df$x)
+circos.track(df$sectors, y = df$y,
+             panel.fun = function(x, y) {
+               circos.text(CELL_META$xcenter, 
+                           CELL_META$cell.ylim[2] + mm_y(5), 
+                           CELL_META$sector.index)
+               circos.axis(labels.cex = 0.6)
+               }
+             )
+col = rep(c("#FF0000", "#00FF00"), 4)
+circos.trackPoints(df$sectors, df$x, df$y, col = col, pch = 16, cex = 0.5)
+circos.text(-1, 0.5, "text", sector.index = "a", track.index = 1)
+bgcol = rep(c("#EFEFEF", "#CCCCCC"), 4)
+circos.trackHist(df$sectors, df$x, bin.size = 0.2, bg.col = bgcol, col = NA)
+
+# add code
+circos.track(df$sectors, x = df$x, y = df$y,
+    panel.fun = function(x, y) {
+        ind = sample(length(x), 10)
+        x2 = x[ind]
+        y2 = y[ind]
+        od = order(x2)
+        circos.lines(x2[od], y2[od])
+})
+```
+
+现在我们回到第二条轨道并更新 sector “d” 中的单元格。这是通过 `circos.updatePlotRegion()` 或简短版本 `circos.update()` 完成的。该功能删除已添加的图形。`circos.update()` 无法修改单元格的 `xlim` 和 `ylim` 以及与单元格位置相关的其他设置。`circos.update()` 需要显式指定 sector index 和 track index，除非“当前”单元格是您要更新的单元格。调用 `circos.update()` 后，“当前”单元格将重定向到您刚刚指定的单元格，您可以使用低级图形函数直接向其中添加图形。（See [Figure 1.5](https://jokergoo.github.io/circlize_book/book/introduction.html#fig:circlize-glance-track-update)）
+
+```{r}
+#| warning: false
+#| message: false
+#| fig-cap: | 
+#|   Figure Figure 1.5: First example of circlize, update the second track.
+
+circos.par("track.height" = 0.1)
+circos.initialize(df$sectors, x = df$x)
+circos.track(df$sectors, y = df$y,
+             panel.fun = function(x, y) {
+               circos.text(CELL_META$xcenter, 
+                           CELL_META$cell.ylim[2] + mm_y(5), 
+                           CELL_META$sector.index)
+               circos.axis(labels.cex = 0.6)
+               }
+             )
+col = rep(c("#FF0000", "#00FF00"), 4)
+circos.trackPoints(df$sectors, df$x, df$y, col = col, pch = 16, cex = 0.5)
+circos.text(-1, 0.5, "text", sector.index = "a", track.index = 1)
+bgcol = rep(c("#EFEFEF", "#CCCCCC"), 4)
+circos.trackHist(df$sectors, df$x, bin.size = 0.2, bg.col = bgcol, col = NA)
+circos.track(df$sectors, x = df$x, y = df$y,
+    panel.fun = function(x, y) {
+        ind = sample(length(x), 10)
+        x2 = x[ind]
+        y2 = y[ind]
+        od = order(x2)
+        circos.lines(x2[od], y2[od])
+})
+
+# add code
+circos.update(sector.index = "d", track.index = 2, 
+    bg.col = "#FF8080", bg.border = "black")
+circos.points(x = -2:2, y = rep(0.5, 5), col = "white")
+circos.text(CELL_META$xcenter, CELL_META$ycenter, "updated", col = "white")
+```
+
+接下来我们继续创建新的轨道。虽然我们回到了第二条轨道，但在创建新轨道时，新轨道仍然是在最里面的轨道之后创建的。在这个新轨道中，我们通过 `circos.rect()` 添加热图。请注意，这里我们没有设置输入数据，而只是设置 `ylim` 参数，因为热图只是从最左到右、从下到上填充整个单元格。此外，`ylim` 的确切值并不重要，并且不使用 `panel.fun()` 中的 `x`、`y`（实际上它们都是 `NULL`）。 （See [Figure 1.6](https://jokergoo.github.io/circlize_book/book/introduction.html#fig:circlize-glance-track-4)）
+
+```{r}
+#| warning: false
+#| message: false
+#| fig-cap: | 
+#|   Figure Figure 1.6: First example of circlize, add the fourth track.
+
+circos.par("track.height" = 0.1)
+circos.initialize(df$sectors, x = df$x)
+circos.track(df$sectors, y = df$y,
+             panel.fun = function(x, y) {
+               circos.text(CELL_META$xcenter, 
+                           CELL_META$cell.ylim[2] + mm_y(5), 
+                           CELL_META$sector.index)
+               circos.axis(labels.cex = 0.6)
+               }
+             )
+col = rep(c("#FF0000", "#00FF00"), 4)
+circos.trackPoints(df$sectors, df$x, df$y, col = col, pch = 16, cex = 0.5)
+circos.text(-1, 0.5, "text", sector.index = "a", track.index = 1)
+bgcol = rep(c("#EFEFEF", "#CCCCCC"), 4)
+circos.trackHist(df$sectors, df$x, bin.size = 0.2, bg.col = bgcol, col = NA)
+circos.track(df$sectors, x = df$x, y = df$y,
+    panel.fun = function(x, y) {
+        ind = sample(length(x), 10)
+        x2 = x[ind]
+        y2 = y[ind]
+        od = order(x2)
+        circos.lines(x2[od], y2[od])
+})
+circos.update(sector.index = "d", track.index = 2, 
+    bg.col = "#FF8080", bg.border = "black")
+circos.points(x = -2:2, y = rep(0.5, 5), col = "white")
+circos.text(CELL_META$xcenter, CELL_META$ycenter, "updated", col = "white")
+
+# add code
+circos.track(ylim = c(0, 1), panel.fun = function(x, y) {
+    xlim = CELL_META$xlim
+    ylim = CELL_META$ylim
+    breaks = seq(xlim[1], xlim[2], by = 0.1)
+    n_breaks = length(breaks)
+    circos.rect(breaks[-n_breaks], rep(ylim[1], n_breaks - 1),
+                breaks[-1], rep(ylim[2], n_breaks - 1),
+                col = rand_color(n_breaks), border = NA)
+})
+```
+
+在圆圈的最里面，添加了链接或功能区。可以存在从单个点到点、点到间隔或间隔到间隔的链接。 [Section 3.12](https://jokergoo.github.io/circlize_book/book/graphics.html#links) 给出了链接的详细用法。
+
+```{r}
+#| warning: false
+#| message: false
+#| fig-cap: | 
+#|   Figure 1.7: First example of circlize, add links.
+
+circos.par("track.height" = 0.1)
+circos.initialize(df$sectors, x = df$x)
+circos.track(df$sectors, y = df$y,
+             panel.fun = function(x, y) {
+               circos.text(CELL_META$xcenter, 
+                           CELL_META$cell.ylim[2] + mm_y(5), 
+                           CELL_META$sector.index)
+               circos.axis(labels.cex = 0.6)
+               }
+             )
+col = rep(c("#FF0000", "#00FF00"), 4)
+circos.trackPoints(df$sectors, df$x, df$y, col = col, pch = 16, cex = 0.5)
+circos.text(-1, 0.5, "text", sector.index = "a", track.index = 1)
+bgcol = rep(c("#EFEFEF", "#CCCCCC"), 4)
+circos.trackHist(df$sectors, df$x, bin.size = 0.2, bg.col = bgcol, col = NA)
+circos.track(df$sectors, x = df$x, y = df$y,
+    panel.fun = function(x, y) {
+        ind = sample(length(x), 10)
+        x2 = x[ind]
+        y2 = y[ind]
+        od = order(x2)
+        circos.lines(x2[od], y2[od])
+})
+circos.update(sector.index = "d", track.index = 2, 
+    bg.col = "#FF8080", bg.border = "black")
+circos.points(x = -2:2, y = rep(0.5, 5), col = "white")
+circos.text(CELL_META$xcenter, CELL_META$ycenter, "updated", col = "white")
+circos.track(ylim = c(0, 1), panel.fun = function(x, y) {
+    xlim = CELL_META$xlim
+    ylim = CELL_META$ylim
+    breaks = seq(xlim[1], xlim[2], by = 0.1)
+    n_breaks = length(breaks)
+    circos.rect(breaks[-n_breaks], rep(ylim[1], n_breaks - 1),
+                breaks[-1], rep(ylim[2], n_breaks - 1),
+                col = rand_color(n_breaks), border = NA)
+})
+
+# add code
+circos.link("a", 0, "b", 0, h = 0.4)
+circos.link("c", c(-0.5, 0.5), "d", c(-0.5,0.5), col = "red",
+    border = "blue", h = 0.2)
+circos.link("e", 0, "g", c(-1,1), col = "green", border = "black", lwd = 2, lty = 2)
+```
+
+最后我们需要重置图形参数和内部变量，这样它就不会弄乱你的下一个绘图。
+
+```{r}
+circos.clear()
+```
+
+
+
+
+
+
+
+
+

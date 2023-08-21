@@ -1,0 +1,29 @@
+---
+title: "About"
+author: "TigerZ"
+date: 2023-08-21
+date-format: "YYYY-MM-DD"
+format: 
+  html:
+    embed-resources: true
+    toc: true
+    code-fold: show
+    code-tools: true
+---
+
+
+这是 [circlize](https://cran.r-project.org/package=circlize) 包的文档。书中的例子是在 0.4.15 版本下生成的。
+
+如果您在出版物中使用 **circlize**，请引用以下内容：
+
+Gu, Z. (2014) circlize implements and enhances circular visualization in R. Bioinformatics. DOI: <https://doi.org/10.1093/bioinformatics/btu393>
+
+![book](https://jokergoo.github.io/circlize_book/book/images/circlize_cover.jpg)
+
+```{r}
+sessionInfo()
+```
+
+
+
+
