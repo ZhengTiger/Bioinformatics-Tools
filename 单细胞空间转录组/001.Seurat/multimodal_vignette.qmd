@@ -1,0 +1,265 @@
+---
+title: "Using Seurat with multimodal data"
+author: "TigerZ"
+date: 2023-08-27
+date-format: YYYY-MM-DD
+format: 
+  html:
+    embed-resources: true
+    toc: true
+    code-fold: show
+    code-tools: true
+---
+
+
+## Load in the data
+导入数据
+
+同时测量同一细胞的多种数据类型的能力，称为多模态分析（multimodal analysis），代表了单细胞基因组学的一个令人兴奋的新前沿。例如，[CITE-seq](http://www.nature.com/nmeth/journal/v14/n9/full/nmeth.4380.html) 能够同时测量同一细胞的转录组和细胞表面蛋白。其他令人兴奋的多模态技术，例如 [10x multiome kit](https://www.10xgenomics.com/products/single-cell-multiome-atac-plus-gene-expression)，可以对细胞转录组和染色质可及性进行配对测量（i.e scRNA-seq+scATAC-seq）。其他可以与细胞转录组一起测量的模式包括遗传扰动、细胞甲基化和来自细胞哈希的标签寡核苷酸。我们设计 Seurat4 来实现各种多模态单细胞数据集的无缝存储、分析和探索。
+
+在此小节中，我们介绍了创建多模态 Seurat 对象并执行初始分析的介绍性工作流程。例如，我们演示了如何根据测量的细胞转录组对 CITE-seq 数据集进行聚类，并随后发现每个聚类中富集的细胞表面蛋白。我们注意到 Seurat4 还支持更先进的技术来分析多模态数据，特别是我们的 [Weighted Nearest Neighbors (WNN)](https://doi.org/10.1016/j.cell.2021.04.048) 方法的应用，该方法能够基于两种模态的加权组合同时对细胞进行聚类。
+
+在这里，我们分析了 8,617 个脐带血单核细胞 (CBMCs) 的数据集，其中转录组测量与 11 种表面蛋白的丰度估计值配对，其水平通过 DNA-barcoded antibodies 进行量化。首先，我们加载两个计数矩阵：一个用于 RNA 测量，另一个用于 antibody-derived tags (ADT)。您可以在[此处](ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE100nnn/GSE100866/suppl/GSE100866_CBMC_8K_13AB_10X-ADT_umi.csv.gz)下载 ADT 文件，在[此处](ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE100nnn/GSE100866/suppl/GSE100866_CBMC_8K_13AB_10X-RNA_umi.csv.gz)下载 RNA 文件。
+
+```{r}
+#| warning: false
+
+library(Seurat)
+library(ggplot2)
+library(patchwork)
+```
+
+```{r}
+# 导入 RNA UMI 矩阵
+
+# 请注意，该数据集还包含约 5% 的小鼠细胞，我们可以将其用作蛋白质测量的负样本对照。
+# 因此，基因表达矩阵有 HUMAN_ 或 MOUSE_ 附加到每个基因的开头。
+
+cbmc.rna <- as.sparse(read.csv(
+  file = "data/GSE100866_CBMC_8K_13AB_10X-RNA_umi.csv.gz",
+  sep = ",",
+  header = TRUE, row.names = 1))
+
+# 为了让以后的生活更轻松一些，我们将丢弃除前 100 个高表达的小鼠基因之外的所有基因，并从 CITE-seq 前缀中删除 “HUMAN_”。
+cbmc.rna <- CollapseSpeciesExpressionMatrix(cbmc.rna)
+
+# 导入 ADT UMI 矩阵
+cbmc.adt <- as.sparse(read.csv(
+  file = "data/GSE100866_CBMC_8K_13AB_10X-ADT_umi.csv.gz",
+  sep = ",",
+  header = TRUE, row.names = 1))
+
+# 请注意，由于测量是在相同的细胞中进行的，因此两个矩阵具有相同的列名称
+all.equal(colnames(cbmc.rna), colnames(cbmc.adt))
+```
+
+
+## Setup a Seurat object, add the RNA and protein data
+设置 Seurat 对象，添加 RNA 和蛋白质数据
+
+现在我们创建一个 Seurat 对象，并添加 ADT 数据作为第二个 assay
+
+```{r}
+# 基于 scRNA-seq 数据创建 Seurat 对象
+cbmc <- CreateSeuratObject(counts = cbmc.rna)
+
+# 我们可以看到，默认情况下，cbmc 对象包含一个存储 RNA 测量值的 assay
+Assays(cbmc)
+```
+
+```{r}
+# 创建一个新的 assay 来存储 ADT 信息
+adt_assay <- CreateAssayObject(counts = cbmc.adt)
+
+# 将此 assay 添加到之前创建的 Seurat 对象中
+cbmc[["ADT"]] <- adt_assay
+
+# 验证对象现在包含多个 assays
+Assays(cbmc)
+```
+
+```{r}
+# 提取 ADT assay 中测量的特征列表
+rownames(cbmc[["ADT"]])
+```
+
+```{r}
+# 请注意，我们可以轻松地在两种检测之间来回切换以指定默认值用于可视化和分析
+# 列出当前默认 assay
+
+DefaultAssay(cbmc)
+```
+
+```{r}
+# 将默认值切换为 ADT
+DefaultAssay(cbmc) <- "ADT"
+DefaultAssay(cbmc)
+```
+
+
+## Cluster cells on the basis of their scRNA-seq profiles
+根据 scRNA-seq 谱对细胞进行聚类
+
+以下步骤代表基于 scRNA-seq 数据的 PBMCs 快速聚类。有关各个步骤或更高级选项的更多详细信息，请参阅[此处](https://satijalab.org/seurat/articles/pbmc3k_tutorial)的 PBMC 聚类指导教程。
+
+```{r}
+# 请注意，以下所有操作均在 RNA assay 上设置上，并验证默认 assay 是 RNA
+
+DefaultAssay(cbmc) <- "RNA"
+DefaultAssay(cbmc)
+```
+
+```{r}
+#| warning: false
+#| message: false
+
+# 执行可视化和聚类步骤
+cbmc <- NormalizeData(cbmc)
+cbmc <- FindVariableFeatures(cbmc)
+cbmc <- ScaleData(cbmc)
+cbmc <- RunPCA(cbmc, verbose = FALSE)
+cbmc <- FindNeighbors(cbmc, dims = 1:30)
+cbmc <- FindClusters(cbmc, resolution = 0.8, verbose = FALSE)
+cbmc <- RunUMAP(cbmc, dims = 1:30)
+DimPlot(cbmc, label = TRUE)
+```
+
+## Visualize multiple modalities side-by-side
+并排可视化多种模态
+
+现在我们已经从 scRNA-seq profiles 中获得了 clusters，我们可以可视化数据集中蛋白质或 RNA 分子的表达。重要的是，Seurat 提供了几种在模态之间切换的方法，并指定您有兴趣分析或可视化的模态。这一点特别重要，因为在某些情况下，相同的特征可以以多种方式出现 - 例如，该数据集包含 B cell marker CD19的独立测量结果（both protein and RNA levels）。
+
+```{r}
+#| warning: false
+#| message: false
+
+# Normalize ADT data,
+DefaultAssay(cbmc) <- "ADT"
+cbmc <- NormalizeData(cbmc, normalization.method = "CLR", margin = 2)
+DefaultAssay(cbmc) <- "RNA"
+
+# 请注意，以下命令是替代命令，但返回相同的结果
+# Note that the following command is an alternative but returns the same result
+cbmc <- NormalizeData(cbmc, normalization.method = "CLR", margin = 2, assay = "ADT")
+
+# 现在，我们将可视化 RNA 和 protein 水平的 CD14 通过设置默认 assay，我们可以可视化其中一个或另一个
+DefaultAssay(cbmc) <- "ADT"
+p1 <- FeaturePlot(cbmc, "CD19", cols = c("lightgrey", "darkgreen")) + ggtitle("CD19 protein")
+DefaultAssay(cbmc) <- "RNA"
+p2 <- FeaturePlot(cbmc, "CD19") + ggtitle("CD19 RNA")
+
+# place plots side-by-side
+p1 | p2
+```
+
+```{r}
+# 或者，我们可以使用特定的 assay key 来指定特定的模态识别密钥用于 RNA 和蛋白质 assays
+Key(cbmc[["RNA"]])
+```
+
+```{r}
+Key(cbmc[["ADT"]])
+```
+
+```{r}
+# 现在，我们可以在功能名称中包含 key，这会覆盖默认 assay
+p1 <- FeaturePlot(cbmc, "adt_CD19", cols = c("lightgrey", "darkgreen")) + ggtitle("CD19 protein")
+p2 <- FeaturePlot(cbmc, "rna_CD19") + ggtitle("CD19 RNA")
+p1 | p2
+```
+
+
+## Identify cell surface markers for scRNA-seq clusters
+识别 scRNA-seq clusters 的细胞表面标记
+
+我们可以利用配对的 CITE-seq 测量来帮助注释来自 scRNA-seq 的 clusters，并识别 protein 和 RNA markers。
+
+```{r}
+# 因为我们知道 CD19 是 一个 B cell marker，我们可以识别 cluster 6 表面表达 CD19
+VlnPlot(cbmc, "adt_CD19")
+```
+
+```{r}
+#| warning: false
+#| message: false
+
+# 我们还可以通过差异表达识别该 cluster 的替代 protein 和 RNA markers
+adt_markers <- FindMarkers(cbmc, ident.1 = 6, assay = "ADT")
+rna_markers <- FindMarkers(cbmc, ident.1 = 6, assay = "RNA")
+
+head(adt_markers)
+```
+
+```{r}
+head(rna_markers)
+```
+
+
+## Additional visualizations of multimodal data
+多模态数据的附加可视化
+
+```{r}
+# 绘制 ADT 散点图（如 FACS 的双轴图）。请注意，您甚至可以“门控”细胞，如果使用 HoverLocator 和 FeatureLocator 所需的值
+
+FeatureScatter(cbmc, feature1 = "adt_CD19", feature2 = "adt_CD3")
+```
+
+```{r}
+# 查看 protein 和 RNA 之间的关系
+FeatureScatter(cbmc, feature1 = "adt_CD3", feature2 = "rna_CD3E")
+```
+
+```{r}
+FeatureScatter(cbmc, feature1 = "adt_CD4", feature2 = "adt_CD8")
+```
+
+```{r}
+# 让我们看看原始（non-normalized）ADT counts。
+# 可以看到数值相当高，特别是与 RNA 值相比。
+# 这是由于细胞中蛋白质拷贝数明显较高，这显着减少了 ADT 数据中的“drop-out”
+
+FeatureScatter(cbmc, feature1 = "adt_CD4", feature2 = "adt_CD8", slot = "counts")
+```
+
+
+## Loading data from 10X multi-modal experiments
+从 10X multi-modal 实验加载数据
+
+Seurat 还能够分析使用 CellRanger v3 处理的多模态 10X 实验的数据；例如，我们使用 7,900 个外周血单核细胞 (PBMC) 的数据集重新创建了上面的图，该数据集可从 10X Genomics 免费获取。
+
+```{r}
+#| eval: false
+
+pbmc10k.data <- Read10X(data.dir = "../data/pbmc10k/filtered_feature_bc_matrix/")
+rownames(x = pbmc10k.data[["Antibody Capture"]]) <- gsub(
+  pattern = "_[control_]*TotalSeqB", replacement = "",
+  x = rownames(x = pbmc10k.data[["Antibody Capture"]]))
+
+pbmc10k <- CreateSeuratObject(counts = pbmc10k.data[["Gene Expression"]], min.cells = 3, min.features = 200)
+pbmc10k <- NormalizeData(pbmc10k)
+pbmc10k[["ADT"]] <- CreateAssayObject(pbmc10k.data[["Antibody Capture"]][, colnames(x = pbmc10k)])
+pbmc10k <- NormalizeData(pbmc10k, assay = "ADT", normalization.method = "CLR")
+
+plot1 <- FeatureScatter(pbmc10k, feature1 = "adt_CD19", feature2 = "adt_CD3", pt.size = 1)
+plot2 <- FeatureScatter(pbmc10k, feature1 = "adt_CD4", feature2 = "adt_CD8a", pt.size = 1)
+plot3 <- FeatureScatter(pbmc10k, feature1 = "adt_CD3", feature2 = "CD3E", pt.size = 1)
+(plot1 + plot2 + plot3) & NoLegend()
+```
+
+
+## Additional functionality for multimodal data in Seurat
+Seurat 中多模态数据的附加功能
+
+Seurat v4 还包括用于分析、可视化和整合多模态数据集的附加功能。更多信息，请浏览以下资源：
+
+- 使用 Seurat v4 中的 WNN 分析从多模态数据定义细胞身份 [vignette](https://satijalab.org/seurat/articles/weighted_nearest_neighbor_analysis)
+- 将 scRNA-seq 数据映射到 CITE-seq references [vignette](https://satijalab.org/seurat/articles/reference_mapping.html)
+- 空间转录组学分析简介 [vignette](https://satijalab.org/seurat/articles/spatial_vignette)
+- 使用 WNN 分析进行 10x 多组分析 (paired scRNA-seq + ATAC) [vignette](https://satijalab.org/seurat/articles/weighted_nearest_neighbor_analysis)
+- Signac：单细胞染色质数据集的分析、解释和探索 [package](https://satijalab.org/signac/)
+- Mixscape：用于汇总单细胞遗传筛选的分析工具包 [vignette](https://satijalab.org/seurat/articles/mixscape_vignette)
+
+
+
+
+

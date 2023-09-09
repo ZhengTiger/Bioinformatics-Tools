@@ -1,0 +1,93 @@
+---
+title: "Integrating scRNA-seq and scATAC-seq data"
+author: "TigerZ"
+date: 2023-08-28
+date-format: YYYY-MM-DD
+format: 
+  html:
+    embed-resources: true
+    toc: true
+    code-fold: show
+    code-tools: true
+---
+
+
+
+单细胞转录组学改变了我们表征细胞状态的能力，但深入的生物学理解需要的不仅仅是 clusters 的分类列表。随着测量不同细胞模式的新方法出现，一个关键的分析挑战是整合这些数据集以更好地了解细胞身份和功能。例如，用户可以在同一生物系统上执行 scRNA-seq 和 scATAC-seq 实验，并使用同一组细胞类型标签对两个数据集进行一致注释。这种分析尤其具有挑战性，因为 scATAC-seq 数据集很难注释，因为以单细胞分辨率收集的基因组数据稀疏，而且 scRNA-seq 数据中缺乏可解释的基因标记。
+
+在 [Stuart*、Butler* et al, 2019](https://www.cell.com/cell/fulltext/S0092-8674(19)30559-8) 中，我们介绍了整合从同一生物系统收集的 scRNA-seq 和 scATAC-seq 数据集的方法，并在此小节中演示了这些方法。我们特别展示了以下分析：
+
+- 如何使用带注释的 scRNA-seq 数据集来标记 scATAC-seq 实验中的细胞
+- 如何从 scRNA-seq 和 scATAC-seq 中 co-visualize（co-embed）细胞
+- 如何将 scATAC-seq 细胞投影到源自 scRNA-seq 实验的 UMAP 上
+
+该小节广泛使用了 [Signac](https://satijalab.org/signac/) 软件包，该软件包最近开发用于分析以单细胞分辨率收集的染色质数据集，包括 scATAC-seq。请访问 [Signac website](https://satijalab.org/signac/articles/pbmc_vignette.html)，了解用于分析 scATAC-seq 数据的其他说明和文档。
+
+我们使用来自 10x Genomics 的公开可用的约 12,000 个人类 PBMC ‘multiome’ 数据集演示了这些方法。在此数据集中，scRNA-seq 和 scATAC-seq profiles 同时收集在同一细胞中。出于本小节的目的，我们将数据集视为源自两个不同的实验并将它们整合在一起。由于它们最初是在相同的细胞中测量的，因此这提供了我们可以用来评估整合准确性的 ground truth。我们强调，我们在这里使用多组学数据集是为了演示和评估目的，用户应该将这些方法应用于单独收集的 scRNA-seq 和 scATAC-seq 数据集。我们提供了一个单独的加权最近邻（WNN）小节，它描述了多组学单细胞数据的分析策略。
+
+
+## Load in data and process each modality individually
+**加载数据并单独处理每种模式**
+
+PBMC multiome 数据集可从 [10x Genomics](https://support.10xgenomics.com/single-cell-multiome-atac-gex/datasets/1.0.0/pbmc_granulocyte_sorted_10k) 获取。为了方便加载和探索，它也作为我们 `SeuratData` 包的一部分提供。我们分别加载 RNA 和 ATAC 数据，并假设这些数据是在单独的实验中测量的。我们在 [WNN](https://satijalab.org/seurat/articles/weighted_nearest_neighbor_analysis) 小节中对这些细胞进行了注释，注释也包含在 `SeuratData` 中。
+
+
+```{r}
+#| message: false
+
+library(SeuratData)
+# install the dataset and load requirements
+InstallData("pbmcMultiome")
+```
+
+
+> 这一步
+
+
+```{r}
+library(Seurat)
+library(Signac)
+library(EnsDb.Hsapiens.v86)
+library(ggplot2)
+library(cowplot)
+```
+
+```{r}
+# load both modalities
+pbmc.rna <- LoadData("pbmcMultiome", "pbmc.rna")
+pbmc.atac <- LoadData("pbmcMultiome", "pbmc.atac")
+
+# 重复 WNN 小节中执行的 QC 步骤
+pbmc.rna <- subset(pbmc.rna, seurat_annotations != "filtered")
+pbmc.atac <- subset(pbmc.atac, seurat_annotations != "filtered")
+
+# 独立执行每种模式的标准分析 RNA 分析
+pbmc.rna <- NormalizeData(pbmc.rna)
+pbmc.rna <- FindVariableFeatures(pbmc.rna)
+pbmc.rna <- ScaleData(pbmc.rna)
+pbmc.rna <- RunPCA(pbmc.rna)
+pbmc.rna <- RunUMAP(pbmc.rna, dims = 1:30)
+
+# ATAC 分析添加基因注释信息
+annotations <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
+seqlevelsStyle(annotations) <- "UCSC"
+genome(annotations) <- "hg38"
+Annotation(pbmc.atac) <- annotations
+
+# 我们排除第一个维度，因为这通常与测序深度相关
+pbmc.atac <- RunTFIDF(pbmc.atac)
+pbmc.atac <- FindTopFeatures(pbmc.atac, min.cutoff = "q0")
+pbmc.atac <- RunSVD(pbmc.atac)
+pbmc.atac <- RunUMAP(pbmc.atac, reduction = "lsi", dims = 2:30, reduction.name = "umap.atac", reduction.key = "atacUMAP_")
+```
+
+
+现在我们绘制两种模式的结果。先前已根据转录组状态对细胞进行了注释。我们将预测 scATAC-seq 细胞的注释。
+
+
+```{r}
+p1 <- DimPlot(pbmc.rna, group.by = "seurat_annotations", label = TRUE) + NoLegend() + ggtitle("RNA")
+p2 <- DimPlot(pbmc.atac, group.by = "orig.ident", label = FALSE) + NoLegend() + ggtitle("ATAC")
+p1 + p2
+```
+
