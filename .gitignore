@@ -1,6 +1,8 @@
 # 单细胞空间转录组
 单细胞空间转录组/001.Seurat/data
 
+单细胞空间转录组/003.anndata/my_results.h5ad
+
 单细胞空间转录组/006.WGCNA/FemaleLiver-Data
 单细胞空间转录组/006.WGCNA/result
 
@@ -15,6 +17,9 @@
 
 单细胞空间转录组/vitessceR/data
 
+单细胞空间转录组/SPACEL/data
+单细胞空间转录组/SPACEL/gpr_models
+单细胞空间转录组/SPACEL/Scube_outputs
 
 
 # 机器学习深度学习
