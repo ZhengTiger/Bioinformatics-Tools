@@ -9,28 +9,28 @@ output:
 ---
 
 
-# Introduction
+## 1 介绍
 
 此小节的目的是向您展示如何使用 XGBoost 更好地发现和理解您自己的数据集。
 
 此小节与预测任何内容无关（请参阅 [XGBoost presentation](https://github.com/dmlc/xgboost/blob/master/R-package/vignettes/xgboostPresentation.Rmd)）。我们将解释如何使用 XGBoost 突出显示数据特征与结果之间的联系。
 
-Package loading:
+加载包:
 
 ```{r}
 require(xgboost)
 require(Matrix)
 require(data.table)
-if (!require('vcd')) install.packages('vcd')
+if (!require('vcd')) {
+  install.packages('vcd')
+}
 ```
 
 VCD 包仅用于其嵌入式数据集之一。
 
+## 2 准备数据集
 
-
-# Preparation of the dataset
-
-## Numeric VS categorical variables
+### 2.1 数值和分类变量
 
 XGBoost 仅管理 `numeric` 向量。
 
@@ -44,12 +44,10 @@ XGBoost 仅管理 `numeric` 向量。
 
 为了回答上面的问题，我们将把分类变量转换为 `numeric` 变量。
 
-## Conversion from categorical to numeric variables
-从分类变量到数值变量的转换
+### 2.2 从分类变量到数值变量的转换
+#### 查看原始数据
 
-### Looking at the raw data
-
-在这个小节中，我们将看到如何将具有分类变量的密集 `data.frame`（密集 = 矩阵中有很少的零）转换为数字特征的非常稀疏的矩阵（稀疏 = 矩阵中的很多零）。
+在这个小节中，我们将看到如何将具有分类变量的密集 `data.frame`（密集 = 矩阵中有很少的零）转换为数字特征的非常稀疏的矩阵（稀疏 = 矩阵中有很多零）。
 
 我们将要看到的方法通常称为 [one-hot encoding](http://en.wikipedia.org/wiki/One-hot)。
 
@@ -62,6 +60,8 @@ df <- data.table(Arthritis, keep.rownames = FALSE)
 
 `data.table` 与 R `data.frame` 100% 兼容，但其语法更加一致，并且其对大型数据集的性能是一流的（包括来自 R 的 `dplyr` 和来自 Python 的 `Pandas`）。 XGBoost R 包的某些部分使用 `data.table`。
 
+我们要做的第一件事是查看 `data.table` 的前几行：
+
 ```{r}
 head(df)
 ```
@@ -72,18 +72,18 @@ head(df)
 str(df)
 ```
 
-2 列具有 `factor` 类型，一列具有 `ordinal` 类型。
+两列具有 `factor` 类型，一列具有 `ordinal` 类型。
 
 `ordinal` 变量：
 
 - 可以采用有限数量的值（如`factor`）；
 - 这些值是有序的（与`factor`不同）。这里这些有序的值是：`Marked > Some > None`
 
-## Creation of new features based on old ones
+#### 基于旧特征创建新特征
 
-我们将添加一些新的分类特征，看看它是否有帮助。
+我们将添加一些新的分类特征来看看是否有帮助。
 
-### Grouping per 10 years
+##### 每10年分组
 
 对于第一个特征，我们通过四舍五入实际年龄来创建年龄组。
 
@@ -92,19 +92,18 @@ str(df)
 因此，20 岁并不比 60 岁更接近 30 岁。简而言之，在这种转换中，年龄之间的距离消失了。
 
 ```{r}
-head(df[,AgeDiscret := as.factor(round(Age/10,0))])
+head(df[, AgeDiscret := as.factor(round(Age / 10, 0))])
 ```
 
-### Random split in two groups
+##### 随机分成两组
 
 以下是对真实年龄的更严格的简化，将其任意拆分为 30 岁。我没有根据地选择这个值。我们稍后会看到根据任意值简化信息是否是一个好的策略（您可能已经知道它的效果如何……）。
 
 ```{r}
-head(df[,AgeCat:= as.factor(ifelse(Age > 30, "Old", "Young"))])
+head(df[, AgeCat := as.factor(ifelse(Age > 30, "Old", "Young"))])
 ```
 
-### Risks in adding correlated features
-添加相关特征的风险
+##### 添加相关特征的风险
 
 这些新特征与 `Age` 特征高度相关，因为它们是该特征的简单转换。
 
@@ -112,9 +111,9 @@ head(df[,AgeCat:= as.factor(ifelse(Age > 30, "Old", "Young"))])
 
 幸运的是，决策树算法（boosted trees）对这些特征非常稳健。因此，我们无需处理这种情况。
 
-## Cleaning data
+#### 清洗数据
 
-我们删除了 ID，因为从这个特征中没有什么可学习的（它只会增加一些噪音）。
+我们删除了 IDs，因为从这个特征中没有什么可学习的（它只会增加一些噪声）。
 
 ```{r}
 df[,ID:=NULL]
@@ -126,51 +125,118 @@ df[,ID:=NULL]
 levels(df[,Treatment])
 ```
 
-## One-hot encoding
+#### 编码分类特征
 
-下一步，我们将把分类数据转换为虚拟变量。这是 [one-hot encoding](http://en.wikipedia.org/wiki/One-hot) 步骤。
+下一步，我们将把分类数据转换为虚拟变量。存在多种编码方法，例如，[one-hot encoding](http://en.wikipedia.org/wiki/One-hot) 是一种常见的方法。我们将使用 [dummy contrast coding](https://stats.oarc.ucla.edu/r/library/r-library-contrast-coding-systems-for-categorical-variables/) ，这种编码很流行，因为它产生“full rank”编码（另请参阅 [Max Kuhn 的这篇博客文章](http://appliedpredictivemodeling.com/blog/2013/10/23/the-basics-of-encoding-categorical-data-for-predictive-models)）。
 
 目的是将每个分类特征的每个值转换为二元特征 `{0, 1}`。
 
-例如，`Treatment`列将替换为两列：`Placebo` 和 `Treated`。他们每个都是二进制的。因此，在转换前在`Treatment`列中具有值 `Placebo` 的观察值在转换后将在新列 `Placebo` 中具有值 1，在新列 `Treated` 中具有值 0。 `Treatment` 列将在 one-hot 编码期间消失。
+例如，`Treatment`列将替换为两列：`TreatmentPlacebo` 和 `TreatmentTreated`。他们每个都是二进制的。因此，在转换前在`Treatment`列中具有值 `Placebo` 的观察值在转换后将在新列 `TreatmentPlacebo` 中具有值 `1`，在新列 `TreatmentTreated` 中具有值 `0`。`TreatmentPlacebo` 列将在对比编码期间消失，因为它将被吸收到公共恒定截距列中。
 
-`Improved` 列被排除在外，因为它将是我们的标签列，即我们想要预测的列。
+`Improved` 列被排除在外，因为它将是我们的 `label` 列，即我们想要预测的列。
 
 ```{r}
-sparse_matrix <- sparse.model.matrix(Improved~.-1, data = df)
+sparse_matrix <- sparse.model.matrix(Improved ~ ., data = df)[, -1]
 head(sparse_matrix)
 ```
 
-上面使用的公式 `Improved~.-1` 表示将所有分类特征但列 `Improved` 转换为二进制值。这里的`-1`是去掉第一列全是`1`的（这一列是转换生成的）。有关详细信息，您可以在控制台中键入 `?sparse.model.matrix`。
+上面使用的公式 `Improved ~ .` 表示将所有分类特征除列 `Improved` 外转换为二进制值。这里的`-1`是去掉第一列全是`1`的（这一列是转换生成的）。有关详细信息，您可以在控制台中键入 `?sparse.model.matrix`。
 
 创建输出`numeric`向量（不是稀疏矩阵）：
 
 ```{r}
-output_vector = df[,Improved] == "Marked"
+output_vector <- df[, Improved] == "Marked"
 ```
 
 1. set `Y` vector to `0`;
 2. set `Y` to `1` for rows where `Improved == Marked` is `TRUE` ;
 3. return `Y` vector.
 
-
-
-# Build the model
+## 3 建立模型
 
 下面的代码很普通。有关详细信息，您可以查看 `xgboost` 函数的文档（或 [XGBoost presentation](https://github.com/dmlc/xgboost/blob/master/R-package/vignettes/xgboostPresentation.Rmd)）。
 
 ```{r}
-bst <- xgboost(data = sparse_matrix, label = output_vector, max.depth = 4,
-               eta = 1, nthread = 2, nrounds = 10,objective = "binary:logistic")
+bst <- xgboost(data = sparse_matrix, label = output_vector, max_depth = 4,
+               eta = 1, nthread = 2, nrounds = 10, objective = "binary:logistic")
 ```
 
 您可以看到一些 `train-error: 0.XXXXX` 行后跟一个数字。它减少了。每行显示模型对数据的解释程度。越低越好。
 
-一个太合适的模型可能会过度拟合（这意味着它复制/粘贴了太多过去，并且不能很好地预测未来）。
+训练误差值较小可能是过拟合的症状，这意味着模型将无法准确预测看不见的值。
 
-在这里您可以看到数字一直减少到第 7 行然后增加。
+## 4 特征重要性
 
-这可能意味着我们过度拟合。为了解决这个问题，我应该将轮数减少到 `nrounds = 4`。我会允许这样的事情，因为我真的不关心这个例子的目的:-)
+### 4.1 衡量特征重要性
+
+#### 构建特征重要性 data.table
+
+请记住，每个二进制列对应于一个分类特征的单个值。
+
+```{r}
+importance <- xgb.importance(feature_names = colnames(sparse_matrix), model = bst)
+head(importance)
+```
+
+`Gain` 列提供了我们正在寻找的信息。
+
+如您所见，特征按 `Gain` 进行分类。
+
+`Gain` 是特征为其所在分支带来的准确性的提高。这个想法是，在将特征 X 上的新分割添加到分支之前，存在一些错误分类的元素；在这个特征上添加分割后，有两个新的分支，并且每个分支都更准确（一个分支说如果你的观察是在这个分支上那么它应该被分类为 `1`，另一个分支说完全相反）。
+
+`Cover` 与损失函数对于特定变量的二阶导数（或 Hessian）有关；因此，较大的值表明变量对损失函数具有较大的潜在影响，因此很重要。
+
+`Frequency` 是测量 `Gain` 的更简单的方法。它只是计算某个特征在所有生成的树中使用的次数。您不应该使用它（除非您知道为什么要使用它）。
+
+#### 绘制特征重要性
+
+所有这些都很好，但绘制结果会更好。
+
+```{r}
+xgb.plot.importance(importance_matrix = importance)
+```
+
+运行这行代码，您应该得到一个显示 6 个特征重要性的条形图（包含与我们之前看到的输出相同的数据，但以直观方式显示它以便于使用）。请注意，`xgb.ggplot.importance` 也可供所有 ggplot2 粉丝使用！
+
+根据数据集和学习参数，您可能有两个以上的类群。默认值是将它们限制为 `10`，但您可以增加此限制。查看函数文档以获取更多信息。
+
+根据上图，该数据集中预测 treatment 是否有效的最重要特征是：
+
+- An individual’s age;
+- Having received a placebo or not;
+- Gender;
+- Our generated feature AgeDiscret. We can see that its contribution is very low.
+
+
+#### 这些结果有意义吗？
+
+让我们检查一下每个特征和标签之间的 `Chi2` 值。
+
+`Chi2` 越高意味着相关性越好。
+
+```{r}
+c2 <- chisq.test(df$Age, output_vector)
+print(c2)
+```
+
+Age 与疾病消失之间的 Pearson 相关性为 `35.47`。
+
+```{r}
+c2 <- chisq.test(df$AgeDiscret, output_vector)
+print(c2)
+```
+
+我们对 Age 的第一次简化得出的  Pearson 相关系数为 `8.26`。
+
+```{r}
+c2 <- chisq.test(df$AgeCat, output_vector)
+print(c2)
+```
+
+我们在 30 岁时对年轻人和老年人进行的完全随机划分的相关性较低，为 `2.36`。这表明，对于我们正在研究的特定疾病，某人易患这种疾病的年龄可能与 30 岁有很大不同。
+
+这个故事的寓意是：不要让你的直觉降低模型的质量。
+
 
 
 

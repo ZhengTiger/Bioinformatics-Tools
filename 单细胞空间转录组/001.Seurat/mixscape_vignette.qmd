@@ -1,0 +1,366 @@
+---
+title: "Mixscape Vignette"
+author: "TigerZ"
+date: 2023-11-04
+date-format: YYYY-MM-DD
+format: 
+  html:
+    embed-resources: true
+    toc: true
+    code-fold: show
+    code-tools: true
+---
+
+## Overview
+**概述**
+
+本教程演示如何使用 mixscape 分析 single-cell pooled CRSIPR screens。我们引入新的 Seurat 函数用于：
+
+1. 计算每个细胞的扰动特定特征。
+2. 识别并去除  ‘escaped’ CRISPR 扰动的细胞。
+3. 可视化不同扰动之间的相似性/差异。
+
+
+## Loading required packages
+**加载需要的包**
+
+```{r}
+# Load packages.
+library(Seurat)
+library(SeuratData)
+library(ggplot2)
+library(patchwork)
+library(scales)
+library(dplyr)
+library(reshape2)
+
+# Download dataset using SeuratData.
+InstallData(ds = "thp1.eccite")
+
+# Setup custom theme for plotting.
+custom_theme <- theme(
+  plot.title = element_text(size=16, hjust = 0.5), 
+  legend.key.size = unit(0.7, "cm"), 
+  legend.text = element_text(size = 14))
+```
+
+
+## Loading Seurat object containing ECCITE-seq dataset
+**加载包含 ECCITE-seq 数据集的 Seurat 对象**
+
+我们使用由刺激的 THP-1 细胞生成的 111 gRNA ECCITE-seq 数据集，该数据集最近由我们的实验室在 bioRxiv [Papalexi et al. 2020](https://www.biorxiv.org/content/10.1101/2020.06.28.175596v1) 发表。可以从 [SeuratData](https://github.com/satijalab/seurat-data) 包轻松下载该数据集。
+
+```{r}
+# Load object.
+eccite <- LoadData(ds = "thp1.eccite")
+
+# Normalize protein.
+eccite <- NormalizeData(
+  object = eccite, 
+  assay = "ADT", 
+  normalization.method = "CLR", 
+  margin = 2)
+```
+
+
+## RNA-based clustering is driven by confounding sources of variation
+**基于 RNA 的聚类是由混杂的变异源驱动的**
+
+在这里，我们遵循标准 Seurat 工作流程，根据细胞的基因表达谱对细胞进行聚类。我们期望获得扰动特异性聚类，但我们发现聚类主要由细胞周期阶段和复制 ID 驱动。我们只观察到一个包含细胞表达 IFNgamma 通路 gRNA 的扰动特异性 cluster。
+
+```{r}
+# Prepare RNA assay for dimensionality reduction: 
+# Normalize data, find variable features and scale data.
+DefaultAssay(object = eccite) <- 'RNA'
+eccite <- NormalizeData(object = eccite) %>% FindVariableFeatures() %>% ScaleData()
+
+# Run Principle Component Analysis (PCA) to reduce the dimensionality of the data.
+eccite <- RunPCA(object = eccite)
+
+# Run Uniform Manifold Approximation and Projection (UMAP) to visualize clustering in 2-D.
+eccite <- RunUMAP(object = eccite, dims = 1:40)
+
+# Generate plots to check if clustering is driven by biological replicate ID, 
+# cell cycle phase or target gene class.
+p1 <- DimPlot(
+  object = eccite, 
+  group.by = 'replicate', 
+  label = F, 
+  pt.size = 0.2, 
+  reduction = "umap", cols = "Dark2", repel = T) +
+  scale_color_brewer(palette = "Dark2") +
+  ggtitle("Biological Replicate") +
+  xlab("UMAP 1") +
+  ylab("UMAP 2") +
+  custom_theme
+
+p2 <- DimPlot(
+  object = eccite, 
+  group.by = 'Phase', 
+  label = F, pt.size = 0.2, 
+  reduction = "umap", repel = T) + 
+  ggtitle("Cell Cycle Phase") +
+  ylab("UMAP 2") +
+  xlab("UMAP 1") +
+  custom_theme
+
+p3 <- DimPlot(
+  object = eccite, 
+  group.by = 'crispr', 
+  pt.size = 0.2, 
+  reduction = "umap", 
+  split.by = "crispr", 
+  ncol = 1, 
+  cols = c("grey39","goldenrod3")) + 
+  ggtitle("Perturbation Status") +
+  ylab("UMAP 2") +
+  xlab("UMAP 1") +
+  custom_theme
+
+# Visualize plots.
+((p1 / p2 + plot_layout(guides = 'auto')) | p3 )
+```
+
+
+## Calculating local perturbation signatures mitigates confounding effects
+**计算局部扰动特征可减轻混杂效应**
+
+为了计算局部扰动特征，我们将非目标最近邻 (NNs) 的数量设置为 k=20，并且我们建议用户从以下范围中选择 k：20 < k < 30。直观上，用户不希望将 k 设置为非常小或很大的数字，因为这很可能不会从数据集中消除技术变化。使用 PRTB 特征对细胞进行聚类可以消除所有技术变化，并揭示一个额外的特定于扰动的聚类。
+
+```{r}
+# Calculate perturbation signature (PRTB).
+eccite<- CalcPerturbSig(
+  object = eccite, 
+  assay = "RNA", 
+  slot = "data", 
+  gd.class ="gene", 
+  nt.cell.class = "NT", 
+  reduction = "pca", 
+  ndims = 40, 
+  num.neighbors = 20, 
+  split.by = "replicate", 
+  new.assay.name = "PRTB")
+
+# Prepare PRTB assay for dimensionality reduction: 
+# Normalize data, find variable features and center data.
+DefaultAssay(object = eccite) <- 'PRTB'
+
+# Use variable features from RNA assay.
+VariableFeatures(object = eccite) <- VariableFeatures(object = eccite[["RNA"]])
+eccite <- ScaleData(object = eccite, do.scale = F, do.center = T)
+
+# Run PCA to reduce the dimensionality of the data.
+eccite <- RunPCA(object = eccite, reduction.key = 'prtbpca', reduction.name = 'prtbpca')
+
+# Run UMAP to visualize clustering in 2-D.
+eccite <- RunUMAP(
+  object = eccite, 
+  dims = 1:40, 
+  reduction = 'prtbpca', 
+  reduction.key = 'prtbumap', 
+  reduction.name = 'prtbumap')
+
+# Generate plots to check if clustering is driven by biological replicate ID, 
+# cell cycle phase or target gene class.
+q1 <- DimPlot(
+  object = eccite, 
+  group.by = 'replicate', 
+  reduction = 'prtbumap', 
+  pt.size = 0.2, cols = "Dark2", label = F, repel = T) +
+  scale_color_brewer(palette = "Dark2") +
+  ggtitle("Biological Replicate") +
+  ylab("UMAP 2") +
+  xlab("UMAP 1") +
+  custom_theme
+
+q2 <- DimPlot(
+  object = eccite, 
+  group.by = 'Phase', 
+  reduction = 'prtbumap', 
+  pt.size = 0.2, label = F, repel = T) +
+  ggtitle("Cell Cycle Phase") +
+  ylab("UMAP 2") +
+  xlab("UMAP 1") + 
+  custom_theme
+
+q3 <- DimPlot(
+  object = eccite,
+  group.by = 'crispr',
+  reduction = 'prtbumap', 
+  split.by = "crispr", 
+  ncol = 1, 
+  pt.size = 0.2, 
+  cols = c("grey39","goldenrod3")) +
+  ggtitle("Perturbation Status") +
+  ylab("UMAP 2") +
+  xlab("UMAP 1") +
+  custom_theme
+
+# Visualize plots.
+(q1 / q2 + plot_layout(guides = 'auto') | q3)
+```
+
+
+## Mixscape identifies cells with no detectable perturbation
+**Mixscape 识别没有可检测到的扰动的细胞**
+
+在这里，我们假设每个目标基因类别是两种高斯分布的混合，一种代表敲除（KO）细胞，另一种代表未扰动（NP）细胞。我们进一步假设 NP 细胞的分布与表达非靶向 gRNA (NT) 的细胞的分布相同，并且我们尝试使用 mixtools 包中的函数 `normalmixEM()` 来估计 KO 细胞的分布。接下来，我们计算细胞属于 KO 分布的后验概率，并将概率高于 0.5 的细胞分类为 KOs。应用这种方法，我们识别了 11 个目标基因类别中的 KOs，并检测每个类别内 gRNA 靶向效率的变化。
+
+```{r}
+# Run mixscape.
+eccite <- RunMixscape(
+  object = eccite, 
+  assay = "PRTB", 
+  slot = "scale.data", 
+  labels = "gene", 
+  nt.class.name = "NT", 
+  min.de.genes = 5, 
+  iter.num = 10, 
+  de.assay = "RNA", 
+  verbose = F,
+  prtb.type = "KO")
+
+# Calculate percentage of KO cells for all target gene classes.
+df <- prop.table(table(eccite$mixscape_class.global, eccite$NT),2)
+
+df2 <- reshape2::melt(df)
+df2$Var2 <- as.character(df2$Var2)
+test <- df2[which(df2$Var1 == "KO"),]
+test <- test[order(test$value, decreasing = T),]
+new.levels <- test$Var2
+df2$Var2 <- factor(df2$Var2, levels = new.levels )
+df2$Var1 <- factor(df2$Var1, levels = c("NT", "NP", "KO"))
+df2$gene <- sapply(as.character(df2$Var2), function(x) strsplit(x, split = "g")[[1]][1])
+df2$guide_number <- sapply(as.character(df2$Var2), 
+                           function(x) strsplit(x, split = "g")[[1]][2])
+df3 <- df2[-c(which(df2$gene == "NT")),]
+
+p1 <- ggplot(df3, aes(x = guide_number, y = value*100, fill= Var1)) +
+  geom_bar(stat= "identity") +
+  theme_classic()+
+  scale_fill_manual(values = c("grey49", "grey79","coral1")) + 
+  ylab("% of cells") +
+  xlab("sgRNA")
+
+p1 + theme(axis.text.x = element_text(size = 18, hjust = 1), 
+           axis.text.y = element_text(size = 18), 
+           axis.title = element_text(size = 16), 
+           strip.text = element_text(size=16, face = "bold")) + 
+  facet_wrap(vars(gene),ncol = 5, scales = "free") +
+  labs(fill = "mixscape class") +theme(legend.title = element_text(size = 14),
+          legend.text = element_text(size = 12))
+```
+
+
+## Inspecting mixscape results
+**检查 mixscape 结果**
+
+为了确保 mixscape 为细胞分配正确的扰动状态，我们可以使用下面的函数来查看目标基因类（例如 IFNGR2）内细胞的扰动分数分布和后验概率，并将其与 NT 细胞的扰动分数分布和后验概率进行比较。此外，我们可以进行差异表达（DE）分析，结果表明只有 IFNGR2 KO 细胞的 IFNG 通路基因的表达降低。最后，作为一项独立检查，我们可以查看 NP 和 KO 细胞中的 PD-L1 蛋白表达值，以了解已知为 PD-L1 调节因子的靶基因。
+
+```{r}
+# Explore the perturbation scores of cells.
+PlotPerturbScore(object = eccite, 
+                 target.gene.ident = "IFNGR2", 
+                 mixscape.class = "mixscape_class", 
+                 col = "coral2") +labs(fill = "mixscape class")
+```
+
+```{r}
+# Inspect the posterior probability values in NP and KO cells.
+VlnPlot(eccite, "mixscape_class_p_ko", idents = c("NT", "IFNGR2 KO", "IFNGR2 NP")) +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5),axis.text = element_text(size = 16) ,plot.title = element_text(size = 20)) + 
+  NoLegend() +
+  ggtitle("mixscape posterior probabilities")
+```
+
+```{r}
+# Run DE analysis and visualize results on a heatmap ordering cells by their posterior 
+# probability values.
+Idents(object = eccite) <- "gene"
+MixscapeHeatmap(object = eccite, 
+                ident.1 = "NT", 
+                ident.2 = "IFNGR2", 
+                balanced = F, 
+                assay = "RNA", 
+                max.genes = 20, angle = 0, 
+                group.by = "mixscape_class", 
+                max.cells.group = 300, 
+                size=6.5) + NoLegend() +theme(axis.text.y = element_text(size = 16))
+```
+
+```{r}
+# Show that only IFNG pathway KO cells have a reduction in PD-L1 protein expression.
+VlnPlot(
+  object = eccite, 
+  features = "adt_PDL1", 
+  idents = c("NT","JAK2","STAT1","IFNGR1","IFNGR2", "IRF1"), 
+  group.by = "gene", 
+  pt.size = 0.2, 
+  sort = T, 
+  split.by = "mixscape_class.global", 
+  cols = c("coral3","grey79","grey39")) +
+  ggtitle("PD-L1 protein") +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5), plot.title = element_text(size = 20), axis.text = element_text(size = 16))
+```
+
+
+## Visualizing perturbation responses with Linear Discriminant Analysis (LDA)
+**使用线性判别分析 (LDA) 可视化扰动响应**
+
+我们使用 LDA 作为降维方法来可视化特定扰动的 clusters。LDA 试图使用基因表达和标签作为输入来最大化已知标签（mixscape 类）的可分离性。
+
+```{r}
+# Remove non-perturbed cells and run LDA to reduce the dimensionality of the data.
+Idents(eccite) <- "mixscape_class.global"
+sub <- subset(eccite, idents = c("KO", "NT"))
+
+# Run LDA.
+sub <- MixscapeLDA(
+  object = sub, 
+  assay = "RNA", 
+  pc.assay = "PRTB", 
+  labels = "gene", 
+  nt.label = "NT", 
+  npcs = 10, 
+  logfc.threshold = 0.25, 
+  verbose = F)
+
+# Use LDA results to run UMAP and visualize cells on 2-D. 
+# Here, we note that the number of the dimensions to be used is equal to the number of 
+# labels minus one (to account for NT cells).
+sub <- RunUMAP(
+  object = sub,
+  dims = 1:11,
+  reduction = 'lda',
+  reduction.key = 'ldaumap',
+  reduction.name = 'ldaumap')
+
+# Visualize UMAP clustering results.
+Idents(sub) <- "mixscape_class"
+sub$mixscape_class <- as.factor(sub$mixscape_class)
+
+# Set colors for each perturbation.
+col = setNames(object = hue_pal()(12),nm = levels(sub$mixscape_class))
+names(col) <- c(names(col)[1:7], "NT", names(col)[9:12])
+col[8] <- "grey39"
+
+p <- DimPlot(object = sub, 
+             reduction = "ldaumap", 
+             repel = T, 
+             label.size = 5, 
+             label = T, 
+             cols = col) + NoLegend()
+
+p2 <- p+ 
+  scale_color_manual(values=col, drop=FALSE) + 
+  ylab("UMAP 2") +
+  xlab("UMAP 1") +
+  custom_theme
+p2
+```
+
+
+
+
+
+

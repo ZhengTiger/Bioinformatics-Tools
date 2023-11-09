@@ -1,0 +1,44 @@
+---
+title: "Introduction to scRNA-seq integration"
+author: "TigerZ"
+date: 2023-11-05
+date-format: YYYY-MM-DD
+format: 
+  html:
+    embed-resources: true
+    toc: true
+    code-fold: show
+    code-tools: true
+---
+
+## Introduction to scRNA-seq integration
+
+
+
+## Integration goals
+
+
+## Setup the Seurat objects
+
+```{r}
+library(Seurat)
+library(SeuratData)
+library(patchwork)
+```
+
+
+```{r}
+# load dataset
+ifnb <- LoadData("ifnb")
+# split the RNA measurements into two layers one for control cells, one for stimulated cells
+
+ifnb[["RNA"]] <- split(ifnb[["RNA"]], f = ifnb$stim)
+ifnb
+```
+
+
+
+
+
+
+
