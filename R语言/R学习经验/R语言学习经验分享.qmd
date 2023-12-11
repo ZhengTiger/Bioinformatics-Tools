@@ -1,0 +1,277 @@
+---
+title: "R 语言学习经验分享"
+author: "郑虎"
+date: 2023-11-08
+format: 
+  revealjs:
+    execute:
+      echo: true
+    number-sections: true
+    smaller: false
+    chalkboard: true
+    scrollable: true
+    embed-resources: false
+    code-link: true
+---
+
+```{r}
+#| include: false
+
+library(tidyverse)
+library(nycflights13)
+library(palmerpenguins)
+library(plotly)
+library(rgl)
+```
+
+# R 基础
+
+## 入门学习 {.smaller}
+
+-   安装 R 和 Rstudio
+
+-   学习 R 基础语法
+
+    -   运算符(&, \|, %in%, ...)
+    -   数据类型：字符串、向量c()、列表list()、数组array()、因子factor()、数据框data.frame()、矩阵matrix()
+    -   条件(if)、循环语句(for)
+    -   函数 function_name \<- function(arg_1, arg_2, ...) { }
+    -   R 包的安装：CRAN、Bioconductor
+        -   使用清华源：
+
+            ``` r
+            install.packages("package", repos = "https://mirrors.ustc.edu.cn/CRAN/")
+            ```
+
+::: {layout-ncol="3"}
+[![](images/Figure1.png){width="30%"}](https://www.bilibili.com/video/BV19x411X7C6/)
+
+[![](images/Figure2.png){width="30%"}](https://www.runoob.com/r/r-tutorial.html)
+
+[![](images/Figure3.png){width="30%"}](https://www.r-project.org/about.html)
+:::
+
+::: notes
+Speaker notes go here.
+:::
+
+## Rstudio 技巧
+
+RStudio 官方教程：<https://docs.posit.co/ide/user/>
+
+-   创建文件 **File -\> New File**
+-   主题设置 **Tools -\> Global Options -\> Appearance**
+
+::: {layout-ncol="2"}
+[![](https://docs.posit.co/ide/user/ide/guide/ui/images/system-files-menu.png){width="40%"}](https://docs.posit.co/ide/user/ide/guide/ui/files.html)
+
+[![](https://docs.posit.co/ide/user/ide/guide/ui/images/rstudio-theme.png){width="50%"}](https://docs.posit.co/ide/user/ide/guide/ui/appearance.html)
+:::
+
+## quarto
+
+quarto 官方文档：<https://quarto.org/>
+
+-   quarto 是一个文档生成工具
+-   可以在 Jupyter、VScode、Rstudio 中使用
+-   适用于多种语言 Python、R、Julia、Observable JS
+-   可用于制作 articles、books、websites、blogs、presentations
+-   可以生成 HTML、PDF、MS Word、ePub 等格式
+-   使用 Markdown 进行编写，可以插入代码、图形、方程等
+
+::: {layout-ncol="1"}
+[![](https://quarto.org/docs/get-started/hello/images/rstudio-hello.png){width="50%"}](https://quarto.org/docs/get-started/hello/rstudio.html)
+:::
+
+更多示例：[Gallery](https://quarto.org/docs/gallery/)
+
+# R 数据分析
+
+## R for Data Science (2e) {.smaller}
+
+::: columns
+::: {.column width="60%"}
+推荐阅读：[《R for Data Science》](https://r4ds.hadley.nz/)
+
+[![](https://tigerz.online/r4ds-zh-cn/diagrams/data-science/whole-game.png)](https://r4ds.hadley.nz/)
+
+数据分析一般包括以下几个部分：
+
+导入（Import）、整理（Tidy）、转换（Transform）、可视化（Visualize）、建模（Model）、交流（Communicate）。
+
+本书着重介绍了前 4 个部分，主要使用了 [tidyverse](https://github.com/tidyverse/tidyverse) 系列包。
+:::
+
+::: {.column width="40%"}
+[![](https://r4ds.hadley.nz/cover.jpg)](https://r4ds.hadley.nz/)
+:::
+:::
+
+tidyverse 官网：<https://www.tidyverse.org/>
+
+[![](images/Figure4.png)](https://www.tidyverse.org/)
+
+只需要 `library(tidyverse)` 就能导入所有包
+
+## 导入（Import）
+
+tidyverse 中导入文件通过 [readr](https://github.com/tidyverse/readr/) 包完成
+
+![](https://github.com/tidyverse/readr/raw/main/man/figures/logo.png){.absolute top="0" right="50" width="180"}
+
+-   读入 csv 文件：
+
+``` r
+students <- read_csv("data/students.csv")
+```
+
+-   读入多个 csv 文件：
+
+``` {.r code-line-numbers="1,2"}
+sales_files <- c("data/01-sales.csv", "data/02-sales.csv", "data/03-sales.csv")
+read_csv(sales_files, id = "file")
+#> # A tibble: 19 × 6
+#>   file              month    year brand  item     n
+#>   <chr>             <chr>   <dbl> <dbl> <dbl> <dbl>
+#> 1 data/01-sales.csv January  2019     1  1234     3
+#> 2 data/01-sales.csv January  2019     1  8721     9
+#> 3 data/01-sales.csv January  2019     1  1822     2
+#> 4 data/01-sales.csv January  2019     2  3333     1
+#> 5 data/01-sales.csv January  2019     2  2156     9
+#> 6 data/01-sales.csv January  2019     2  3987     6
+#> # ℹ 13 more rows
+```
+
+-   写入 csv 文件：
+
+``` r
+write_csv(students, "students.csv")
+```
+
+## 整理（Tidy）
+
+tidyverse 中整理数据通过 [tidyr](https://github.com/tidyverse/tidyr/) 包完成
+
+![](https://github.com/tidyverse/tidyr/raw/main/man/figures/logo.png){.absolute top="0" right="50" width="180"}
+
+-   `pivot_longer()` 整理数据：
+
+```{r}
+billboard
+```
+
+```{r}
+billboard |> 
+  pivot_longer(
+    cols = starts_with("wk"), 
+    names_to = "week", 
+    values_to = "rank"
+  )
+```
+
+## 转换（Transform）
+
+tidyverse 中整理数据通过 [dplyr](https://github.com/tidyverse/dplyr/) 包完成
+
+![](https://github.com/tidyverse/dplyr/raw/main/man/figures/logo.png){.absolute top="0" right="50" width="180"}
+
+现在有一个 `flights` 数据：
+
+```{r}
+flights
+```
+
+需要按 `month` 分组求 `dep_delay` 的平均值：
+
+```{r}
+flights |> 
+  group_by(month) |> 
+  summarize(
+    delay = mean(dep_delay, na.rm = TRUE)
+  )
+```
+
+## 可视化（Visualize）
+
+tidyverse 中整理数据通过 [ggplot2](https://github.com/tidyverse/ggplot2/) 包完成
+
+![](https://ggplot2.tidyverse.org/logo.png){.absolute top="0" right="50" width="180"}
+
+-   通过 ggplot 绘制散点图：
+
+```{r}
+ggplot(penguins, aes(x = flipper_length_mm, y = body_mass_g)) +
+  geom_point(aes(color = species, shape = species)) +
+  facet_wrap(~island)
+```
+
+**一些常用的绘图 package：**
+
+-   热图绘制：[pheatmap](https://github.com/raivokolde/pheatmap)、[ComplexHeatmap](https://github.com/jokergoo/ComplexHeatmap)
+
+[![](https://user-images.githubusercontent.com/449218/47718635-2ec22980-dc49-11e8-9f01-37becb19e0d5.png)](https://github.com/jokergoo/ComplexHeatmap)
+
+-   环状图绘制：[circlize](https://github.com/jokergoo/circlize)
+
+[![](https://jokergoo.github.io/circlize_book/book/01-introduction_files/figure-html/circlize-glance-track-links-1.png)](https://github.com/jokergoo/circlize)
+
+-   调色板：[ggsci](https://github.com/nanxstats/ggsci)
+
+[![](https://nanx.me/ggsci/articles/ggsci_files/figure-html/unnamed-chunk-27-1.png)](https://github.com/nanxstats/ggsci)
+
+-   拼图：[cowplot](https://github.com/wilkelab/cowplot/)
+
+[![](https://wilkelab.org/cowplot/articles/shared_legends_files/figure-html/unnamed-chunk-6-1.png)](https://github.com/wilkelab/cowplot/)
+
+-   交互式绘图：[plotly.R](https://github.com/plotly/plotly.R)、[dygraphs](https://github.com/rstudio/dygraphs)
+
+```{r}
+p <- ggplot(diamonds, aes(x = log(carat), y = log(price))) + 
+  geom_hex(bins = 100)
+ggplotly(p)
+```
+
+-   3D 绘图：[rgl](https://github.com/dmurdoch/rgl)
+
+```{r "plot3d()"}
+plotids <- with(iris, plot3d(Sepal.Length, Sepal.Width, Petal.Length, 
+                  type="s", col=as.numeric(Species)))
+rglwidget(elementId = "plot3drgl")
+```
+
+-   R 绘图 gallery：
+-   [The R Graph Gallery](https://r-graph-gallery.com/index.html)
+-   [ggplot2 extensions](https://exts.ggplot2.tidyverse.org/gallery/)
+
+# R 包开发
+
+## R Packages (2e) {.smaller}
+
+::: columns
+::: {.column width="60%"}
+推荐阅读：[《R Packages》](https://r-pkgs.org/)
+
+[![](https://r-pkgs.org/diagrams/workflow.png)](https://r-pkgs.org/whole-game.html#review)
+
+一个 R package 一般包括以下几个部分：
+
+代码（code）、数据（data）、文档（documentation）、测试（tests）。
+
+本书介绍了如何利用 [devtools](https://github.com/r-lib/devtools/) 包和 RStudio IDE 来开发 R package。
+
+使用 devtools 安装 github 上的包：
+
+``` r
+devtools::install_github("github repository")
+```
+:::
+
+::: {.column width="40%"}
+[![](https://r-pkgs.org/images/cover-2e-small.png)](https://r-pkgs.org/)
+:::
+:::
+
+## 一个示例R包 {.smaller}
+
+[![](images/Figure5.png)](https://github.com/zhenghu159/Biorplot)
+
