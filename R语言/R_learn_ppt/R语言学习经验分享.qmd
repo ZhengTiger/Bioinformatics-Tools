@@ -1,7 +1,7 @@
 ---
 title: "R 语言学习经验分享"
 author: "郑虎"
-date: 2023-11-08
+date: 2023-12-18
 format: 
   revealjs:
     execute:
@@ -33,15 +33,20 @@ library(rgl)
 -   学习 R 基础语法
 
     -   运算符(&, \|, %in%, ...)
-    -   数据类型：字符串、向量c()、列表list()、数组array()、因子factor()、数据框data.frame()、矩阵matrix()
+    -   数据类型：字符串、向量c()、列表list()、数组array()、**`因子factor()`**、数据框data.frame()、矩阵matrix()
+        - 例：使用factor()自定义细胞类群顺序
+          ```r
+          seurat_obj$sample <- factor(seurat_obj$sample, levels=c(D,C,B,A))
+          ```
     -   条件(if)、循环语句(for)
     -   函数 function_name \<- function(arg_1, arg_2, ...) { }
-    -   R 包的安装：CRAN、Bioconductor
-        -   使用清华源：
+    -   R 包的安装：CRAN、Bioconductor、Github
+        -   **`使用清华源：`**
 
             ``` r
             install.packages("package", repos = "https://mirrors.ustc.edu.cn/CRAN/")
             ```
+-   R 入门学习资料：
 
 ::: {layout-ncol="3"}
 [![](images/Figure1.png){width="30%"}](https://www.bilibili.com/video/BV19x411X7C6/)
@@ -75,7 +80,7 @@ quarto 官方文档：<https://quarto.org/>
 -   quarto 是一个文档生成工具
 -   可以在 Jupyter、VScode、Rstudio 中使用
 -   适用于多种语言 Python、R、Julia、Observable JS
--   可用于制作 articles、books、websites、blogs、presentations
+-   可用于制作 articles、books、websites、blogs、**`presentations`**
 -   可以生成 HTML、PDF、MS Word、ePub 等格式
 -   使用 Markdown 进行编写，可以插入代码、图形、方程等
 
@@ -93,7 +98,7 @@ quarto 官方文档：<https://quarto.org/>
 ::: {.column width="60%"}
 推荐阅读：[《R for Data Science》](https://r4ds.hadley.nz/)
 
-[![](https://tigerz.online/r4ds-zh-cn/diagrams/data-science/whole-game.png)](https://r4ds.hadley.nz/)
+[![](images/whole-game.png)](https://r4ds.hadley.nz/)
 
 数据分析一般包括以下几个部分：
 
@@ -117,7 +122,7 @@ tidyverse 官网：<https://www.tidyverse.org/>
 
 tidyverse 中导入文件通过 [readr](https://github.com/tidyverse/readr/) 包完成
 
-![](https://github.com/tidyverse/readr/raw/main/man/figures/logo.png){.absolute top="0" right="50" width="180"}
+![](images/readr_logo.png){.absolute top="0" right="50" width="180"}
 
 -   读入 csv 文件：
 
@@ -152,13 +157,15 @@ write_csv(students, "students.csv")
 
 tidyverse 中整理数据通过 [tidyr](https://github.com/tidyverse/tidyr/) 包完成
 
-![](https://github.com/tidyverse/tidyr/raw/main/man/figures/logo.png){.absolute top="0" right="50" width="180"}
+![](images/tidyr_logo.png){.absolute top="0" right="50" width="180"}
 
 -   `pivot_longer()` 整理数据：
 
 ```{r}
 billboard
 ```
+
+<br>
 
 ```{r}
 billboard |> 
@@ -173,7 +180,7 @@ billboard |>
 
 tidyverse 中整理数据通过 [dplyr](https://github.com/tidyverse/dplyr/) 包完成
 
-![](https://github.com/tidyverse/dplyr/raw/main/man/figures/logo.png){.absolute top="0" right="50" width="180"}
+![](images/dplyr_logo.png){.absolute top="0" right="50" width="180"}
 
 现在有一个 `flights` 数据：
 
@@ -195,7 +202,7 @@ flights |>
 
 tidyverse 中整理数据通过 [ggplot2](https://github.com/tidyverse/ggplot2/) 包完成
 
-![](https://ggplot2.tidyverse.org/logo.png){.absolute top="0" right="50" width="180"}
+![](images/ggplot2_logo.png){.absolute top="0" right="50" width="180"}
 
 -   通过 ggplot 绘制散点图：
 
@@ -209,19 +216,19 @@ ggplot(penguins, aes(x = flipper_length_mm, y = body_mass_g)) +
 
 -   热图绘制：[pheatmap](https://github.com/raivokolde/pheatmap)、[ComplexHeatmap](https://github.com/jokergoo/ComplexHeatmap)
 
-[![](https://user-images.githubusercontent.com/449218/47718635-2ec22980-dc49-11e8-9f01-37becb19e0d5.png)](https://github.com/jokergoo/ComplexHeatmap)
+[![](images/ComplexHeatmap.png)](https://github.com/jokergoo/ComplexHeatmap)
 
 -   环状图绘制：[circlize](https://github.com/jokergoo/circlize)
 
-[![](https://jokergoo.github.io/circlize_book/book/01-introduction_files/figure-html/circlize-glance-track-links-1.png)](https://github.com/jokergoo/circlize)
+[![](images/circlize.png)](https://github.com/jokergoo/circlize)
 
--   调色板：[ggsci](https://github.com/nanxstats/ggsci)
+-   调色板：[ggsci](https://github.com/nanxstats/ggsci)、[viridis](https://github.com/sjmgarnier/viridis)
 
-[![](https://nanx.me/ggsci/articles/ggsci_files/figure-html/unnamed-chunk-27-1.png)](https://github.com/nanxstats/ggsci)
+[![](images/ggsci.png)](https://github.com/nanxstats/ggsci)
 
--   拼图：[cowplot](https://github.com/wilkelab/cowplot/)
+-   拼图：[cowplot](https://github.com/wilkelab/cowplot/)、[aplot](https://github.com/YuLab-SMU/aplot)
 
-[![](https://wilkelab.org/cowplot/articles/shared_legends_files/figure-html/unnamed-chunk-6-1.png)](https://github.com/wilkelab/cowplot/)
+[![](images/cowplot.png)](https://github.com/wilkelab/cowplot/)
 
 -   交互式绘图：[plotly.R](https://github.com/plotly/plotly.R)、[dygraphs](https://github.com/rstudio/dygraphs)
 
@@ -240,8 +247,8 @@ rglwidget(elementId = "plot3drgl")
 ```
 
 -   R 绘图 gallery：
--   [The R Graph Gallery](https://r-graph-gallery.com/index.html)
--   [ggplot2 extensions](https://exts.ggplot2.tidyverse.org/gallery/)
+  -   [The R Graph Gallery](https://r-graph-gallery.com/index.html)
+  -   [ggplot2 extensions](https://exts.ggplot2.tidyverse.org/gallery/)
 
 # R 包开发
 
@@ -251,7 +258,7 @@ rglwidget(elementId = "plot3drgl")
 ::: {.column width="60%"}
 推荐阅读：[《R Packages》](https://r-pkgs.org/)
 
-[![](https://r-pkgs.org/diagrams/workflow.png)](https://r-pkgs.org/whole-game.html#review)
+[![](images/workflow.png)](https://r-pkgs.org/whole-game.html#review)
 
 一个 R package 一般包括以下几个部分：
 
@@ -267,11 +274,43 @@ devtools::install_github("github repository")
 :::
 
 ::: {.column width="40%"}
-[![](https://r-pkgs.org/images/cover-2e-small.png)](https://r-pkgs.org/)
+[![](images/R-packages.png)](https://r-pkgs.org/)
 :::
 :::
 
 ## 一个示例R包 {.smaller}
 
+::: columns
 [![](images/Figure5.png)](https://github.com/zhenghu159/Biorplot)
+:::
+
+# R 生信工具
+
+## 以 scRNAseq 分析为例
+
+- [singlecellcourse](https://www.singlecellcourse.org/): R 单细胞分析教程
+
+- [Seurat](https://github.com/satijalab/seurat): 单细胞分析 R 工具
+
+- [scCustomize](https://github.com/samuel-marsh/scCustomize)、[scRNAtoolVis](https://github.com/junjunlab/scRNAtoolVis): 单细胞数据可视化
+
+- [DoubletFinder](https://github.com/chris-mcginnis-ucsf/DoubletFinder): 检测 scRNAseq 中的双细胞
+
+- [clustree](https://github.com/lazappi/clustree): 确定单细胞聚类的分辨率
+
+- [SingleR](https://github.com/LTLA/SingleR): 单细胞自动注释工具
+
+- [harmony](https://github.com/immunogenomics/harmony): 单细胞整合工具
+
+- [sceasy](https://github.com/cellgeni/sceasy): 单细胞数据格式相互转换
+
+- [hdWGCNA](https://github.com/smorabit/hdWGCNA): 单细胞基因共表达网络分析
+
+- [monocle3](https://github.com/cole-trapnell-lab/monocle3): 拟时序分析
+
+- [CellChat](https://github.com/sqjin/CellChat): 细胞通讯分析
+
+- [ShinyCell](https://github.com/SGDDNB/ShinyCell)、[vitessceR](https://github.com/vitessce/vitessceR): 单细胞网页展示
+
+# Thanks {.unnumbered}
 
